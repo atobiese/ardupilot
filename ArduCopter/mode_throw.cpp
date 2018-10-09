@@ -78,7 +78,7 @@ void Copter::ModeThrow::run()
         gcs().send_text(MAV_SEVERITY_INFO,"height achieved - controlling position");
         stage = Throw_PosHold;
 
-        // initialise the loiter target to the curent position and velocity
+        // initialise the loiter target to the current position and velocity
         loiter_nav->clear_pilot_desired_acceleration();
         loiter_nav->init_target();
 
@@ -169,7 +169,7 @@ void Copter::ModeThrow::run()
         motors->set_desired_spool_state(AP_Motors::DESIRED_THROTTLE_UNLIMITED);
 
         // run loiter controller
-        loiter_nav->update(ekfGndSpdLimit, ekfNavVelGainScaler);
+        loiter_nav->update();
 
         // call attitude controller
         attitude_control->input_euler_angle_roll_pitch_euler_rate_yaw(loiter_nav->get_roll(), loiter_nav->get_pitch(), 0.0f);

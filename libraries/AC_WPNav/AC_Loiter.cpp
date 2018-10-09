@@ -106,8 +106,10 @@ void AC_Loiter::init_target(const Vector3f& position)
     _pos_control.set_desired_velocity_xy(0.0f,0.0f);
     _pos_control.set_desired_accel_xy(0.0f,0.0f);
 
-    // initialise position controller
-    _pos_control.init_xy_controller();
+    // initialise position controller if not already active
+    if (!_pos_control.is_active_xy()) {
+        _pos_control.init_xy_controller();
+    }
 }
 
 /// initialize's position and feed-forward velocity from current pos and velocity
@@ -201,7 +203,7 @@ float AC_Loiter::get_angle_max_cd() const
 }
 
 /// run the loiter controller
-void AC_Loiter::update(float ekfGndSpdLimit, float ekfNavVelGainScaler)
+void AC_Loiter::update()
 {
     // calculate dt
     float dt = _pos_control.time_since_last_xy_update();
@@ -213,8 +215,8 @@ void AC_Loiter::update(float ekfGndSpdLimit, float ekfNavVelGainScaler)
     _pos_control.set_max_speed_xy(_speed_cms);
     _pos_control.set_max_accel_xy(_accel_cmss);
 
-    calc_desired_velocity(dt,ekfGndSpdLimit);
-    _pos_control.update_xy_controller(ekfNavVelGainScaler);
+    calc_desired_velocity(dt);
+    _pos_control.update_xy_controller();
 }
 
 // sanity check parameters
@@ -226,8 +228,11 @@ void AC_Loiter::sanity_check_params()
 
 /// calc_desired_velocity - updates desired velocity (i.e. feed forward) with pilot requested acceleration and fake wind resistance
 ///		updated velocity sent directly to position controller
-void AC_Loiter::calc_desired_velocity(float nav_dt, float ekfGndSpdLimit)
+void AC_Loiter::calc_desired_velocity(float nav_dt)
 {
+    float ekfGndSpdLimit, ekfNavVelGainScaler;
+    AP::ahrs_navekf().getEkfControlLimits(ekfGndSpdLimit, ekfNavVelGainScaler);
+
     // calculate a loiter speed limit which is the minimum of the value set by the LOITER_SPEED
     // parameter and the value set by the EKF to observe optical flow limits
     float gnd_speed_limit_cms = MIN(_speed_cms, ekfGndSpdLimit*100.0f);

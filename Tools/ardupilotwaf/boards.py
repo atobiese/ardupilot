@@ -91,6 +91,17 @@ class Board:
             '-Werror=unused-result',
         ]
 
+        if cfg.options.enable_scripting:
+            env.DEFINES.update(
+                ENABLE_SCRIPTING = 1,
+                LUA_32BITS = 1,
+                )
+
+            env.AP_LIBRARIES += [
+                'AP_Scripting',
+                'AP_Scripting/lua/src',
+                ]
+
         if 'clang' in cfg.env.COMPILER_CC:
             env.CFLAGS += [
                 '-fcolor-diagnostics',
@@ -322,7 +333,8 @@ class chibios(Board):
 
         # make board name available for USB IDs
         env.CHIBIOS_BOARD_NAME = 'HAL_BOARD_NAME="%s"' % self.name
-        env.CXXFLAGS += cfg.env.CPU_FLAGS + [
+        env.CFLAGS += cfg.env.CPU_FLAGS + [
+            '-Wno-cast-align',
             '-Wlogical-op',
             '-Wframe-larger-than=1300',
             '-fsingle-precision-constant',
@@ -332,10 +344,7 @@ class chibios(Board):
             '-Wno-error=float-equal',
             '-Wno-error=undef',
             '-Wno-error=cpp',
-            '-Wno-cast-align',
             '-fno-exceptions',
-            '-fno-rtti',
-            '-fno-threadsafe-statics',
             '-Wall',
             '-Wextra',
             '-Wno-sign-compare',
@@ -366,9 +375,13 @@ class chibios(Board):
             '-fno-builtin-puts',
             '-mno-thumb-interwork',
             '-mthumb',
-            '-DCHIBIOS_BOARD_NAME="%s"' % self.name,
             '--specs=nano.specs',
-            '-specs=nosys.specs'
+            '-specs=nosys.specs',
+            '-DCHIBIOS_BOARD_NAME="%s"' % self.name,
+        ]
+        env.CXXFLAGS += env.CFLAGS + [
+            '-fno-rtti',
+            '-fno-threadsafe-statics',
         ]
 
         if sys.platform == 'cygwin':

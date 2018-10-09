@@ -1173,9 +1173,14 @@ const AP_Param::GroupInfo ParametersG2::var_info[] = {
     // @Param: FLIGHT_OPTIONS
     // @DisplayName: Flight mode options
     // @Description: Flight mode specific options
-    // @Bitmask: 0:Rudder mixing in direct flight modes only (Manual, Stabilize, Acro),1:Use centered throttle in Cruise or FBWB to indicate trim airspeed
+    // @Bitmask: 0:Rudder mixing in direct flight modes only (Manual Stabilize Acro),1:Use centered throttle in Cruise or FBWB to indicate trim airspeed
     // @User: Advanced
     AP_GROUPINFO("FLIGHT_OPTIONS", 13, ParametersG2, flight_options, 0),
+
+#ifdef ENABLE_SCRIPTING
+    // Scripting is intentionally not showing up in the parameter docs until it is a more standard feature
+    AP_SUBGROUPINFO(scripting, "SCR_", 14, ParametersG2, AP_Scripting),
+#endif
 
     AP_GROUPEND
 };
