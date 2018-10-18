@@ -81,6 +81,10 @@ protected:
     void publish_filtered_field(const Vector3f &mag, uint8_t instance);
     void set_last_update_usec(uint32_t last_update, uint8_t instance);
 
+    void accumulate_sample(Vector3f &field, uint8_t instance,
+                           uint32_t max_samples = 10);
+    void drain_accumulated_samples(uint8_t instance, const Vector3f *scale = NULL);
+
     // register a new compass instance with the frontend
     uint8_t register_compass(void) const;
 
@@ -106,7 +110,7 @@ protected:
     Compass &_compass;
 
     // semaphore for access to shared frontend data
-    AP_HAL::Semaphore *_sem;
+    HAL_Semaphore_Recursive _sem;
 
     // Check that the compass field is valid by using a mean filter on the vector length
     bool field_ok(const Vector3f &field);

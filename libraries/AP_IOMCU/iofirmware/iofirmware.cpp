@@ -8,6 +8,7 @@
 #include <AP_Math/crc.h>
 #include "iofirmware.h"
 #include "hal.h"
+#include <AP_HAL_ChibiOS/RCInput.h>
 extern const AP_HAL::HAL &hal;
 
 //#pragma GCC optimize("Og")
@@ -200,13 +201,17 @@ void AP_IOMCU_FW::heater_update()
 
 void AP_IOMCU_FW::rcin_update()
 {
+    ((ChibiOS::RCInput *)hal.rcin)->_timer_tick();
+    uint32_t now = AP_HAL::micros();
     if (hal.rcin->new_input()) {
         rc_input.count = hal.rcin->num_channels();
         rc_input.flags_rc_ok = true;
         for (uint8_t i = 0; i < IOMCU_MAX_CHANNELS; i++) {
             rc_input.pwm[i] = hal.rcin->read(i);
         }
-        rc_input.last_input_us = AP_HAL::micros();
+        rc_input.last_input_us = now;
+    } else if (now - rc_input.last_input_us > 200000U) {
+        rc_input.flags_rc_ok = false;
     }
     if (update_rcout_freq) {
         hal.rcout->set_freq(reg_setup.pwm_rates, reg_setup.pwm_altrate);
