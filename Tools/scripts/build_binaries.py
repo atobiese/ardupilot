@@ -518,6 +518,7 @@ is bob we will attempt to checkout bob-AVR'''
                 "F4BY",
                 "mRoX21-777",
                 "F35Lightning",
+		"omnibusf4v6",
                 "speedybeef4"]
 
     def build_arducopter(self, tag):
