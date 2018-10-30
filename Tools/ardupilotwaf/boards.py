@@ -97,9 +97,17 @@ class Board:
                 LUA_32BITS = 1,
                 )
 
+            env.ROMFS_FILES += [
+                ('sandbox.lua', 'libraries/AP_Scripting/scripts/sandbox.lua'),
+                ]
+
             env.AP_LIBRARIES += [
                 'AP_Scripting',
                 'AP_Scripting/lua/src',
+                ]
+
+            env.CXXFLAGS += [
+                '-DHAL_HAVE_AP_ROMFS_EMBEDDED_H'
                 ]
 
         if 'clang' in cfg.env.COMPILER_CC:
@@ -118,6 +126,9 @@ class Board:
                 '-g',
                 '-O0',
             ]
+
+        if cfg.options.enable_math_check_indexes:
+            env.CXXFLAGS += ['-DMATH_CHECK_INDEXES']
 
         env.CXXFLAGS += [
             '-std=gnu++11',
@@ -147,6 +158,7 @@ class Board:
             '-Werror=switch',
             '-Werror=sign-compare',
             '-Werror=unused-result',
+            '-Werror=return-type',
             '-Wfatal-errors',
             '-Wno-trigraphs',
         ]
@@ -221,6 +233,14 @@ class Board:
     def embed_ROMFS_files(self, ctx):
         '''embed some files using AP_ROMFS'''
         import embed
+        if ctx.env.USE_NUTTX_IOFW:
+            # use fmuv2_IO_NuttX.bin instead of fmuv2_IO.bin
+            for i in range(len(ctx.env.ROMFS_FILES)):
+                (name,filename) = ctx.env.ROMFS_FILES[i]
+                if name == 'io_firmware.bin':
+                    filename = 'Tools/IO_Firmware/fmuv2_IO_NuttX.bin'
+                    print("Using IO firmware %s" % filename)
+                    ctx.env.ROMFS_FILES[i] = (name,filename);
         header = ctx.bldnode.make_node('ap_romfs_embedded.h').abspath()
         if not embed.create_embedded_h(header, ctx.env.ROMFS_FILES):
             bld.fatal("Failed to created ap_romfs_embedded.h")

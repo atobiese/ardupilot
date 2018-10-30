@@ -752,9 +752,7 @@ void AP_OSD_Screen::draw_blh_rpm(uint8_t x, uint8_t y)
         if (!blheli->get_telem_data(0, td)) {
             return;
         }
-
-        int esc_rpm = td.rpm * 14;   // hard-wired assumption for now that motor has 14 poles, so multiply eRPM * 14 to get motor RPM.
-        backend->write(x, y, false, "%5d%c", esc_rpm, SYM_RPM);
+        backend->write(x, y, false, "%5d%c", td.rpm, SYM_RPM);
     }
 }
 
@@ -768,7 +766,7 @@ void AP_OSD_Screen::draw_blh_amps(uint8_t x, uint8_t y)
             return;
         }
 
-        float esc_amps = td.current;
+        float esc_amps = td.current * 0.01;
         backend->write(x, y, false, "%4.1f%c", esc_amps, SYM_AMP);
     }
 }
