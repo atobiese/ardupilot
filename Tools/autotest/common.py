@@ -349,7 +349,7 @@ class AutoTest(ABC):
         self.mavproxy.send('wp list\n')
         self.mavproxy.expect('Requesting 0 waypoints')
 
-    def log_download(self, filename, timeout=360):
+    def log_download(self, filename, timeout=360, upload_logs=False):
         """Download latest log."""
         self.mav.wait_heartbeat()
         self.mavproxy.send("log list\n")
@@ -361,6 +361,17 @@ class AutoTest(ABC):
         self.mavproxy.expect("Finished downloading", timeout=timeout)
         self.mav.wait_heartbeat()
         self.mav.wait_heartbeat()
+        if upload_logs and not os.getenv("AUTOTEST_NO_UPLOAD"):
+            # optionally upload logs to server so we can see travis failure logs
+            import subprocess, glob, datetime
+            logdir=os.path.dirname(filename)
+            datedir=datetime.datetime.now().strftime("%Y-%m-%d-%H-%M")
+            flist = glob.glob("logs/*.BIN")
+            for e in ['BIN','bin','tlog']:
+                flist += glob.glob(os.path.join(logdir, '*.%s' % e))
+            print("Uploading %u logs to http://firmware.ardupilot.org/CI-Logs/%s" % (len(flist), datedir))
+            cmd = ['rsync', '-avz'] + flist + ['cilogs@autotest.ardupilot.org::CI-Logs/%s/' % datedir]
+            subprocess.call(cmd)
 
     def show_gps_and_sim_positions(self, on_off):
         """Allow to display gps and actual position on map."""
@@ -1397,21 +1408,26 @@ class AutoTest(ABC):
                 interlock_value = self.get_parameter("SERVO%u_MIN" % interlock_channel)
                 tstart = self.get_sim_time()
                 while True:
-                    remaining = 20 - (self.get_sim_time_cached() - tstart)
-                    if remaining <= 0:
-                        break
+                    if self.get_sim_time_cached() - tstart > 20:
+                        self.set_rc(8, 1000)
+                        break # success!
                     m = self.mav.recv_match(type='SERVO_OUTPUT_RAW',
                                             blocking=True,
-                                            timeout=remaining)
+                                            timeout=2)
+                    if m is None:
+                        continue
                     m_value = getattr(m, channel_field, None)
                     if m_value is None:
+                        self.set_rc(8, 1000)
                         raise ValueError("Message has no %s field" %
                                          channel_field)
                     self.progress("SERVO_OUTPUT_RAW.%s=%u want=%u" %
                                   (channel_field, m_value, interlock_value))
                     if m_value != interlock_value:
+                        self.set_rc(8, 1000)
                         raise NotAchievedException(
                                 "Motor interlock was changed while disarmed")
+
             self.set_rc(8, 1000)
         self.progress("ALL PASS")
         self.context_pop()

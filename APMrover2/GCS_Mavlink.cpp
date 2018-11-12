@@ -279,21 +279,6 @@ void Rover::send_fence_status(mavlink_channel_t chan)
     fence_send_mavlink_status(chan);
 }
 
-void Rover::send_wind(mavlink_channel_t chan)
-{
-    // exit immediately if no wind vane
-    if (!rover.g2.windvane.enabled()) {
-        return;
-    }
-
-    // send wind
-    mavlink_msg_wind_send(
-        chan,
-        degrees(rover.g2.windvane.get_apparent_wind_direction_rad()),
-        0,
-        0);
-}
-
 void Rover::send_wheel_encoder(mavlink_channel_t chan)
 {
     // send wheel encoder data using rpm message
@@ -372,7 +357,7 @@ bool GCS_MAVLINK_Rover::try_send_message(enum ap_message id)
 
     case MSG_WIND:
         CHECK_PAYLOAD_SIZE(WIND);
-        rover.send_wind(chan);
+        rover.g2.windvane.send_wind(chan);
         break;
 
     case MSG_PID_TUNING:
@@ -657,12 +642,16 @@ MAV_RESULT GCS_MAVLINK_Rover::handle_command_long_packet(const mavlink_command_l
     switch (packet.command) {
 
     case MAV_CMD_NAV_RETURN_TO_LAUNCH:
-        rover.set_mode(rover.mode_rtl, MODE_REASON_GCS_COMMAND);
-        return MAV_RESULT_ACCEPTED;
+        if (rover.set_mode(rover.mode_rtl, MODE_REASON_GCS_COMMAND)) {
+            return MAV_RESULT_ACCEPTED;
+        }
+        return MAV_RESULT_FAILED;
 
     case MAV_CMD_MISSION_START:
-        rover.set_mode(rover.mode_auto, MODE_REASON_GCS_COMMAND);
-        return MAV_RESULT_ACCEPTED;
+        if (rover.set_mode(rover.mode_auto, MODE_REASON_GCS_COMMAND)) {
+            return MAV_RESULT_ACCEPTED;
+        }
+        return MAV_RESULT_FAILED;
 
     case MAV_CMD_COMPONENT_ARM_DISARM:
         if (is_equal(packet.param1, 1.0f)) {
@@ -740,7 +729,7 @@ MAV_RESULT GCS_MAVLINK_Rover::handle_command_long_packet(const mavlink_command_l
 
         // exit if vehicle is not in Guided mode
         if (rover.control_mode != &rover.mode_guided) {
-            return MAV_RESULT_UNSUPPORTED;
+            return MAV_RESULT_FAILED;
         }
 
         // send yaw change and target speed to guided mode controller
@@ -795,6 +784,8 @@ void GCS_MAVLINK_Rover::handleMessage(mavlink_message_t* msg)
         RC_Channels::set_override(6, packet.chan7_raw, tnow);
         RC_Channels::set_override(7, packet.chan8_raw, tnow);
 
+        // an RC override message is considered to be a 'heartbeat' from the ground station for failsafe purposes
+        rover.failsafe.last_heartbeat_ms = tnow;
         break;
     }
 
@@ -818,18 +809,18 @@ void GCS_MAVLINK_Rover::handleMessage(mavlink_message_t* msg)
         RC_Channels::set_override(uint8_t(rover.rcmap.roll() - 1), roll, tnow);
         RC_Channels::set_override(uint8_t(rover.rcmap.throttle() - 1), throttle, tnow);
 
+        // a manual control message is considered to be a 'heartbeat' from the ground station for failsafe purposes
+        rover.failsafe.last_heartbeat_ms = tnow;
         break;
     }
 
     case MAVLINK_MSG_ID_HEARTBEAT:
         {
-            // We keep track of the last time we received a heartbeat from our GCS for failsafe purposes
+            // we keep track of the last time we received a heartbeat from our GCS for failsafe purposes
             if (msg->sysid != rover.g.sysid_my_gcs) {
                 break;
             }
-
-            rover.last_heartbeat_ms = AP_HAL::millis();
-            rover.failsafe_trigger(FAILSAFE_EVENT_GCS, false);
+            rover.failsafe.last_heartbeat_ms = AP_HAL::millis();
             break;
         }
 

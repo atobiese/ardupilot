@@ -328,7 +328,7 @@ const AP_Param::GroupInfo QuadPlane::var_info[] = {
     // @Param: OPTIONS
     // @DisplayName: quadplane options
     // @Description: This provides a set of additional control options for quadplanes. LevelTransition means that the wings should be held level to within LEVEL_ROLL_LIMIT degrees during transition to fixed wing flight, and the vehicle will not use the vertical lift motors to climb during the transition. If AllowFWTakeoff bit is not set then fixed wing takeoff on quadplanes will instead perform a VTOL takeoff. If AllowFWLand bit is not set then fixed wing land on quadplanes will instead perform a VTOL land. If respect takeoff frame is not set the vehicle will interpret all takeoff waypoints as an altitude above the corrent position.
-    // @Bitmask: 0:LevelTransition,1:AllowFWTakeoff,2:AllowFWLand,3:Respect takeoff frame types
+    // @Bitmask: 0:LevelTransition,1:AllowFWTakeoff,2:AllowFWLand,3:Respect takeoff frame types,4:Use a fixed wing approach for VTOL landings
     AP_GROUPINFO("OPTIONS", 58, QuadPlane, options, 0),
 
     AP_SUBGROUPEXTENSION("",59, QuadPlane, var_info2),
@@ -358,7 +358,17 @@ const AP_Param::GroupInfo QuadPlane::var_info2[] = {
     // @Range: 1 5
     // @User: Standard
     AP_GROUPINFO("TAILSIT_THSCMX", 3, QuadPlane, tailsitter.throttle_scale_max, 5),
-	
+
+    // @Param: TRIM_PITCH
+    // @DisplayName: Quadplane AHRS trim pitch
+    // @Description: This sets the compensation for the pitch angle trim difference between forward and vertical flight pitch, NOTE! this is relative to forward flight trim not mounting locaiton. For tailsitters this is relative to a baseline of 90 degrees.
+    // @Units: deg
+    // @Range: -10 +10
+    // @Increment: 0.1
+    // @User: Advanced
+    // @RebootRequired: True
+    AP_GROUPINFO("TRIM_PITCH", 4, QuadPlane, ahrs_trim_pitch, 0),
+
     AP_GROUPEND
 };
 
@@ -548,11 +558,11 @@ bool QuadPlane::setup(void)
     AP_Param::load_object_from_eeprom(motors, motors_var_info);
 
     // create the attitude view used by the VTOL code
-    ahrs_view = ahrs.create_view(rotation);
+    ahrs_view = ahrs.create_view(rotation, ahrs_trim_pitch);
     if (ahrs_view == nullptr) {
         goto failed;
     }
-    
+
     attitude_control = new AC_AttitudeControl_Multi(*ahrs_view, aparm, *motors, loop_delta_t);
     if (!attitude_control) {
         hal.console->printf("%s attitude_control\n", strUnableToAllocate);
@@ -1711,7 +1721,6 @@ bool QuadPlane::in_vtol_auto(void) const
     }
     uint16_t id = plane.mission.get_current_nav_cmd().id;
     switch (id) {
-    case MAV_CMD_NAV_VTOL_LAND:
     case MAV_CMD_NAV_VTOL_TAKEOFF:
         return true;
     case MAV_CMD_NAV_LOITER_UNLIM:
@@ -1721,6 +1730,7 @@ bool QuadPlane::in_vtol_auto(void) const
         return plane.auto_state.vtol_loiter;
     case MAV_CMD_NAV_TAKEOFF:
         return is_vtol_takeoff(id);
+    case MAV_CMD_NAV_VTOL_LAND:
     case MAV_CMD_NAV_LAND:
         return is_vtol_land(id);
     default:
@@ -2057,12 +2067,12 @@ void QuadPlane::control_auto(const Location &loc)
             takeoff_controller();
         }
         break;
+    case MAV_CMD_NAV_VTOL_LAND:
     case MAV_CMD_NAV_LAND:
         if (is_vtol_land(id)) {
             vtol_position_controller();
         }
         break;
-    case MAV_CMD_NAV_VTOL_LAND:
     case MAV_CMD_NAV_LOITER_UNLIM:
     case MAV_CMD_NAV_LOITER_TIME:
     case MAV_CMD_NAV_LOITER_TURNS:
@@ -2164,6 +2174,8 @@ bool QuadPlane::do_vtol_land(const AP_Mission::Mission_Command& cmd)
     throttle_wait = false;
     landing_detect.lower_limit_start_ms = 0;
     set_alt_target_current();
+
+    plane.crash_state.is_crashed = false;
     
     // also update nav_controller for status output
     plane.nav_controller->update_waypoint(plane.prev_WP_loc, plane.next_WP_loc);
@@ -2562,7 +2574,11 @@ bool QuadPlane::is_vtol_takeoff(uint16_t id) const
 bool QuadPlane::is_vtol_land(uint16_t id) const
 {
     if (id == MAV_CMD_NAV_VTOL_LAND) {
-        return true;
+        if (options & QuadPlane::OPTION_MISSION_LAND_FW_APPROACH) {
+            return plane.vtol_approach_s.approach_stage == Plane::Landing_ApproachStage::VTOL_LANDING;
+        } else {
+            return true;
+        }
     }
     if (id == MAV_CMD_NAV_LAND && available() && (options & OPTION_ALLOW_FW_LAND) == 0) {
         // treat fixed wing land as VTOL land
