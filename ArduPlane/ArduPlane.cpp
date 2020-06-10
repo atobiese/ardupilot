@@ -51,8 +51,9 @@ const AP_Scheduler::Task Plane::scheduler_tasks[] = {
 #if ADVANCED_FAILSAFE == ENABLED
     SCHED_TASK(afs_fs_check,           10,    100),
 #endif
+    SCHED_TASK(ekf_check,              10,     75),
     SCHED_TASK_CLASS(GCS,            (GCS*)&plane._gcs,       update_receive,   300,  500),
-    SCHED_TASK_CLASS(GCS,            (GCS*)&plane._gcs,       update_send,      300,  500),
+    SCHED_TASK_CLASS(GCS,            (GCS*)&plane._gcs,       update_send,      300,  750),
     SCHED_TASK_CLASS(AP_ServoRelayEvents, &plane.ServoRelayEvents, update_events,          50,  150),
     SCHED_TASK_CLASS(AP_BattMonitor, &plane.battery, read, 10, 300),
     SCHED_TASK_CLASS(AP_Baro, &plane.barometer, accumulate, 50, 150),
@@ -220,8 +221,10 @@ void Plane::update_logging2(void)
 #endif
     }
     
-    if (should_log(MASK_LOG_NTUN))
+    if (should_log(MASK_LOG_NTUN)) {
         Log_Write_Nav_Tuning();
+        Log_Write_Guided();
+    }
 
     if (should_log(MASK_LOG_RC))
         Log_Write_RC();
@@ -261,6 +264,8 @@ void Plane::one_second_loop()
 
     adsb.set_stall_speed_cm(aparm.airspeed_min);
     adsb.set_max_speed(aparm.airspeed_max);
+
+    ahrs.writeDefaultAirSpeed((float)((aparm.airspeed_min + aparm.airspeed_max)/2));
 
     // sync MAVLink system ID
     mavlink_system.sysid = g.sysid_this_mav;
@@ -551,6 +556,10 @@ void Plane::update_alt()
 {
     barometer.update();
 
+    if (quadplane.available()) {
+        quadplane.motors->set_air_density_ratio(barometer.get_air_density_ratio());
+    }
+
     // calculate the sink rate.
     float sink_rate;
     Vector3f vel;
@@ -578,22 +587,23 @@ void Plane::update_alt()
             distance_beyond_land_wp = current_loc.get_distance(next_WP_loc);
         }
 
-        bool soaring_active = false;
-#if SOARING_ENABLED == ENABLED
-        if (g2.soaring_controller.is_active() && g2.soaring_controller.get_throttle_suppressed()) {
-            soaring_active = true;
+        float target_alt = relative_target_altitude_cm();
+
+        if (control_mode == &mode_rtl && !rtl.done_climb && g2.rtl_climb_min > 0) {
+            // ensure we do the initial climb in RTL. We add an extra
+            // 10m in the demanded height to push TECS to climb
+            // quickly
+            target_alt = MAX(target_alt, prev_WP_loc.alt + (g2.rtl_climb_min+10)*100);
         }
-#endif
-        
-        SpdHgt_Controller->update_pitch_throttle(relative_target_altitude_cm(),
+
+        SpdHgt_Controller->update_pitch_throttle(target_alt,
                                                  target_airspeed_cm,
                                                  flight_stage,
                                                  distance_beyond_land_wp,
                                                  get_takeoff_pitch_min_cd(),
                                                  throttle_nudge,
                                                  tecs_hgt_afe(),
-                                                 aerodynamic_load_factor,
-                                                 soaring_active);
+                                                 aerodynamic_load_factor);
     }
 }
 

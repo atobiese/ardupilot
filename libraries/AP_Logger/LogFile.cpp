@@ -448,11 +448,10 @@ bool AP_Logger_Backend::Write_Mission_Cmd(const AP_Mission &mission,
     return WriteBlock(&pkt, sizeof(pkt));
 }
 
-void AP_Logger_Backend::Write_EntireMission()
+bool AP_Logger_Backend::Write_EntireMission()
 {
-    LoggerMessageWriter_WriteEntireMission writer{};
-    writer.set_logger_backend(this);
-    writer.process();
+    // kick off asynchronous write:
+    return _startup_messagewriter->writeentiremission();
 }
 
 // Write a text message to the log
@@ -767,15 +766,12 @@ bool AP_Logger_Backend::Write_Mode(uint8_t mode, const ModeReason reason)
 //   current is in centi-amps
 //   temperature is in centi-degrees Celsius
 //   current_tot is in centi-amp hours
-void AP_Logger::Write_ESC(uint8_t id, uint64_t time_us, int32_t rpm, uint16_t voltage, uint16_t current, int16_t esc_temp, uint16_t current_tot, int16_t motor_temp)
+void AP_Logger::Write_ESC(uint8_t instance, uint64_t time_us, int32_t rpm, uint16_t voltage, uint16_t current, int16_t esc_temp, uint16_t current_tot, int16_t motor_temp)
 {
-    // sanity check id
-    if (id >= 8) {
-        return;
-    }
     const struct log_Esc pkt{
-        LOG_PACKET_HEADER_INIT(uint8_t(LOG_ESC1_MSG+id)),
+        LOG_PACKET_HEADER_INIT(uint8_t(LOG_ESC_MSG)),
         time_us     : time_us,
+        instance    : instance,
         rpm         : rpm,
         voltage     : voltage,
         current     : current,
@@ -912,6 +908,44 @@ void AP_Logger::Write_VisualOdom(float time_delta, const Vector3f &angle_delta, 
         confidence          : confidence
     };
     WriteBlock(&pkt_visualodom, sizeof(log_VisualOdom));
+}
+
+// Write visual position sensor data.  x,y,z are in meters, angles are in degrees
+void AP_Logger::Write_VisualPosition(uint64_t remote_time_us, uint32_t time_ms, float x, float y, float z, float roll, float pitch, float yaw, float pos_err, float ang_err, uint8_t reset_counter)
+{
+    const struct log_VisualPosition pkt_visualpos {
+        LOG_PACKET_HEADER_INIT(LOG_VISUALPOS_MSG),
+        time_us         : AP_HAL::micros64(),
+        remote_time_us  : remote_time_us,
+        time_ms         : time_ms,
+        pos_x           : x,
+        pos_y           : y,
+        pos_z           : z,
+        roll            : roll,
+        pitch           : pitch,
+        yaw             : yaw,
+        pos_err         : pos_err,
+        ang_err         : ang_err,
+        reset_counter   : reset_counter
+    };
+    WriteBlock(&pkt_visualpos, sizeof(log_VisualPosition));
+}
+
+// Write visual velocity sensor data, velocity in NED meters per second
+void AP_Logger::Write_VisualVelocity(uint64_t remote_time_us, uint32_t time_ms, const Vector3f &vel, float vel_err, uint8_t reset_counter)
+{
+    const struct log_VisualVelocity pkt_visualvel {
+        LOG_PACKET_HEADER_INIT(LOG_VISUALVEL_MSG),
+        time_us         : AP_HAL::micros64(),
+        remote_time_us  : remote_time_us,
+        time_ms         : time_ms,
+        vel_x           : vel.x,
+        vel_y           : vel.y,
+        vel_z           : vel.z,
+        vel_err         : vel_err,
+        reset_counter   : reset_counter
+    };
+    WriteBlock(&pkt_visualvel, sizeof(log_VisualVelocity));
 }
 
 // Write AOA and SSA

@@ -118,13 +118,16 @@ void NavEKF3_core::readRangeFinder(void)
     }
 }
 
-void NavEKF3_core::writeBodyFrameOdom(float quality, const Vector3f &delPos, const Vector3f &delAng, float delTime, uint32_t timeStamp_ms, const Vector3f &posOffset)
+void NavEKF3_core::writeBodyFrameOdom(float quality, const Vector3f &delPos, const Vector3f &delAng, float delTime, uint32_t timeStamp_ms, uint16_t delay_ms, const Vector3f &posOffset)
 {
     // limit update rate to maximum allowed by sensor buffers and fusion process
     // don't try to write to buffer until the filter has been initialised
     if (((timeStamp_ms - bodyOdmMeasTime_ms) < frontend->sensorIntervalMin_ms) || (delTime < dtEkfAvg) || !statesInitialised) {
         return;
     }
+
+    // subtract delay from timestamp
+    timeStamp_ms -= delay_ms;
 
     bodyOdmDataNew.body_offset = &posOffset;
     bodyOdmDataNew.vel = delPos * (1.0f/delTime);
@@ -393,6 +396,9 @@ void NavEKF3_core::readIMUData()
     // update the inactive bias states
     learnInactiveBiases();
 
+    // run movement check using IMU data
+    updateMovementCheck();
+
     readDeltaVelocity(accel_index_active, imuDataNew.delVel, imuDataNew.delVelDT);
     accelPosOffset = ins.get_imu_pos_offset(accel_index_active);
     imuDataNew.accel_index = accel_index_active;
@@ -618,7 +624,7 @@ void NavEKF3_core::readGpsData()
 
             if (gpsGoodToAlign && !have_table_earth_field) {
                 const Compass *compass = _ahrs->get_compass();
-                if (compass && compass->have_scale_factor(magSelectIndex)) {
+                if (compass && compass->have_scale_factor(magSelectIndex) && compass->auto_declination_enabled()) {
                     table_earth_field_ga = AP_Declination::get_earth_field_ga(gpsloc);
                     table_declination = radians(AP_Declination::get_declination(gpsloc.lat*1.0e-7,
                                                                             gpsloc.lng*1.0e-7));
@@ -927,7 +933,74 @@ void NavEKF3_core::writeEulerYawAngle(float yawAngle, float yawAngleErr, uint32_
     yawMeasTime_ms = timeStamp_ms;
 }
 
+// Writes the default equivalent airspeed in m/s to be used in forward flight if a measured airspeed is required and not available.
+void NavEKF3_core::writeDefaultAirSpeed(float airspeed)
+{
+    defaultAirSpeed = airspeed;
+}
 
+/********************************************************
+*            External Navigation Measurements           *
+********************************************************/
+
+void NavEKF3_core::writeExtNavData(const Vector3f &pos, const Quaternion &quat, float posErr, float angErr, uint32_t timeStamp_ms, uint16_t delay_ms, uint32_t resetTime_ms)
+{
+    // limit update rate to maximum allowed by sensor buffers and fusion process
+    // don't try to write to buffer until the filter has been initialised
+    if (((timeStamp_ms - extNavMeasTime_ms) < frontend->extNavIntervalMin_ms) || !statesInitialised) {
+        return;
+    } else {
+        extNavMeasTime_ms = timeStamp_ms;
+    }
+
+    ext_nav_elements extNavDataNew {};
+
+    if (resetTime_ms != extNavLastPosResetTime_ms) {
+        extNavDataNew.posReset = true;
+        extNavLastPosResetTime_ms = resetTime_ms;
+    } else {
+        extNavDataNew.posReset = false;
+    }
+
+    extNavDataNew.pos = pos;
+    extNavDataNew.posErr = posErr;
+
+    // calculate timestamp
+    timeStamp_ms = timeStamp_ms - delay_ms;
+    // Correct for the average intersampling delay due to the filter update rate
+    timeStamp_ms -= localFilterTimeStep_ms/2;
+    // Prevent time delay exceeding age of oldest IMU data in the buffer
+    timeStamp_ms = MAX(timeStamp_ms, imuDataDelayed.time_ms);
+    extNavDataNew.time_ms = timeStamp_ms;
+
+    // extract yaw from the attitude
+    float roll_rad, pitch_rad, yaw_rad;
+    quat.to_euler(roll_rad, pitch_rad, yaw_rad);
+
+    // ensure yaw accuracy is no better than 5 degrees (some callers may send zero)
+    const float yaw_accuracy_rad = MAX(angErr, radians(5.0f));
+    writeEulerYawAngle(yaw_rad, yaw_accuracy_rad, timeStamp_ms, 2);
+
+    storedExtNav.push(extNavDataNew);
+}
+
+void NavEKF3_core::writeExtNavVelData(const Vector3f &vel, float err, uint32_t timeStamp_ms, uint16_t delay_ms)
+{
+    if ((timeStamp_ms - extNavVelMeasTime_ms) < frontend->extNavIntervalMin_ms) {
+        return;
+    }
+
+    extNavVelMeasTime_ms = timeStamp_ms - delay_ms;
+    useExtNavVel = true;
+    extNavVelNew.vel = vel;
+    extNavVelNew.err = err;
+    // Correct for the average intersampling delay due to the filter updaterate
+    timeStamp_ms -= localFilterTimeStep_ms/2;
+    // Prevent time delay exceeding age of oldest IMU data in the buffer
+    timeStamp_ms = MAX(timeStamp_ms,imuDataDelayed.time_ms);
+    extNavVelNew.time_ms = timeStamp_ms;
+    storedExtNavVel.push(extNavVelNew);
+}
 
 /*
   update timing statistics structure
@@ -1047,4 +1120,98 @@ float NavEKF3_core::MagDeclination(void) const
         return 0;
     }
     return _ahrs->get_compass()->get_declination();
+}
+
+/*
+  Update the on ground and not moving check.
+  Should be called once per IMU update.
+  Only updates when on ground and when operating without a magnetometer
+*/
+void NavEKF3_core::updateMovementCheck(void)
+{
+    if (!onGround &&
+        effectiveMagCal != MagCal::EXTERNAL_YAW &&
+        effectiveMagCal != MagCal::EXTERNAL_YAW_FALLBACK &&
+        effectiveMagCal != MagCal::GSF_YAW)
+    {
+        onGroundNotMoving = false;
+        return;
+    }
+
+    const float gyro_limit = radians(3.0f);
+    const float gyro_diff_limit = 0.1;
+    const float accel_limit = 1.0f;
+    const float accel_diff_limit = 5.0f;
+    const float hysteresis_ratio = 0.7f;
+    const float dtEkfAvgInv = 1.0f / dtEkfAvg;
+
+    // get latest bias corrected gyro and accelerometer data
+    const AP_InertialSensor &ins = AP::ins();
+    Vector3f gyro = ins.get_gyro(gyro_index_active) - stateStruct.gyro_bias * dtEkfAvgInv;
+    Vector3f accel = ins.get_accel(accel_index_active) - stateStruct.accel_bias * dtEkfAvgInv;
+
+    if (!prevOnGround) {
+        gyro_prev = gyro;
+        accel_prev = accel;
+        onGroundNotMoving = false;
+        gyro_diff = gyro_diff_limit;
+        accel_diff = accel_diff_limit;
+        return;
+    }
+
+    // calculate a gyro rate of change metric
+    Vector3f temp = (gyro - gyro_prev) * dtEkfAvgInv;
+    gyro_prev = gyro;
+    gyro_diff = 0.99f * gyro_diff + 0.01f * temp.length();
+
+    // calculate a acceleration rate of change metric
+    temp = (accel - accel_prev) * dtEkfAvgInv;
+    accel_prev = accel;
+    accel_diff = 0.99f * accel_diff + 0.01f * temp.length();
+
+    const float gyro_length_ratio = gyro.length() / gyro_limit;
+    const float accel_length_ratio = (accel.length() - GRAVITY_MSS) / accel_limit;
+    const float gyro_diff_ratio = gyro_diff / gyro_diff_limit;
+    const float accel_diff_ratio = accel_diff / accel_diff_limit;
+    bool logStatusChange = false;
+    if (onGroundNotMoving) {
+        if (gyro_length_ratio > 1.0f ||
+            fabsf(accel_length_ratio) > 1.0f ||
+            gyro_diff_ratio > 1.0f ||
+            accel_diff_ratio > 1.0f)
+        {
+            onGroundNotMoving = false;
+            logStatusChange = true;
+        }
+    } else if (gyro_length_ratio < hysteresis_ratio &&
+            fabsf(accel_length_ratio) < hysteresis_ratio &&
+            gyro_diff_ratio < hysteresis_ratio &&
+            accel_diff_ratio < hysteresis_ratio)
+    {
+        onGroundNotMoving = true;
+        logStatusChange = true;
+    }
+
+    if (logStatusChange || imuSampleTime_ms - lastMoveCheckLogTime_ms > 200) {
+        lastMoveCheckLogTime_ms = imuSampleTime_ms;
+// @LoggerMessage: XKFM
+// @Description: EKF3 diagnostic data for on-ground-and-not-moving check
+// @Field: TimeUS: Time since system startup
+// @Field: OGNM: True of on ground and not moving
+// @Field: GLR: Gyroscope length ratio
+// @Field: ALR: Accelerometer length ratio
+// @Field: GDR: Gyroscope rate of change ratio
+// @Field: ADR: Accelerometer rate of change ratio
+        AP::logger().Write("XKFM",
+                        "TimeUS,OGNM,GLR,ALR,GDR,ADR",
+                        "s-----",
+                        "F-----",
+                        "QBffff",
+                        AP_HAL::micros64(),
+                        uint8_t(onGroundNotMoving),
+                        float(gyro_length_ratio),
+                        float(accel_length_ratio),
+                        float(gyro_diff_ratio),
+                        float(accel_diff_ratio));
+    }
 }

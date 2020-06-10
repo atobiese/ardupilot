@@ -1,9 +1,13 @@
 #include "AP_BattMonitor.h"
 #include "AP_BattMonitor_Analog.h"
 #include "AP_BattMonitor_SMBus.h"
+#include "AP_BattMonitor_SMBus_Solo.h"
+#include "AP_BattMonitor_SMBus_Generic.h"
+#include "AP_BattMonitor_SMBus_Maxell.h"
 #include "AP_BattMonitor_Bebop.h"
 #include "AP_BattMonitor_BLHeliESC.h"
 #include "AP_BattMonitor_SMBus_SUI.h"
+#include "AP_BattMonitor_SMBus_NeoDesign.h"
 #include "AP_BattMonitor_Sum.h"
 #include "AP_BattMonitor_FuelFlow.h"
 #include "AP_BattMonitor_FuelLevel_PWM.h"
@@ -120,6 +124,12 @@ AP_BattMonitor::init()
                                                                   hal.i2c_mgr->get_device(_params[instance]._i2c_bus, AP_BATTMONITOR_SMBUS_I2C_ADDR,
                                                                                           100000, true, 20));
                 break;
+            case AP_BattMonitor_Params::BattMonitor_TYPE_SMBus_Generic:
+                _params[instance]._i2c_bus.set_default(AP_BATTMONITOR_SMBUS_BUS_EXTERNAL);
+                drivers[instance] = new AP_BattMonitor_SMBus_Generic(*this, state[instance], _params[instance],
+                                                                     hal.i2c_mgr->get_device(_params[instance]._i2c_bus, AP_BATTMONITOR_SMBUS_I2C_ADDR,
+                                                                                             100000, true, 20));
+                break;
             case AP_BattMonitor_Params::BattMonitor_TYPE_SUI3:
                 _params[instance]._i2c_bus.set_default(AP_BATTMONITOR_SMBUS_BUS_INTERNAL),
                 drivers[instance] = new AP_BattMonitor_SMBus_SUI(*this, state[instance], _params[instance],
@@ -165,6 +175,12 @@ AP_BattMonitor::init()
                 drivers[instance] = new AP_BattMonitor_FuelLevel_PWM(*this, state[instance], _params[instance]);
                 break;
 #endif // HAL_BATTMON_FUEL_ENABLE
+            case AP_BattMonitor_Params::BattMonitor_TYPE_NeoDesign:
+                _params[instance]._i2c_bus.set_default(AP_BATTMONITOR_SMBUS_BUS_INTERNAL),
+                drivers[instance] = new AP_BattMonitor_SMBus_NeoDesign(*this, state[instance], _params[instance],
+                                                                 hal.i2c_mgr->get_device(_params[instance]._i2c_bus, AP_BATTMONITOR_SMBUS_I2C_ADDR,
+                                                                                         100000, true, 20));
+                break;
             case AP_BattMonitor_Params::BattMonitor_TYPE_NONE:
             default:
                 break;
@@ -228,7 +244,7 @@ void AP_BattMonitor::convert_params(void) {
     info.old_key = 36;
 #elif APM_BUILD_TYPE(APM_BUILD_ArduSub)
     info.old_key = 33;
-#elif APM_BUILD_TYPE(APM_BUILD_APMrover2)
+#elif APM_BUILD_TYPE(APM_BUILD_Rover)
     info.old_key = 145;
 #else
     _params[0]._type.save(true);

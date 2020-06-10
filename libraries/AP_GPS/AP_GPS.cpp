@@ -64,7 +64,7 @@ const uint32_t AP_GPS::_baudrates[] = {9600U, 115200U, 4800U, 19200U, 38400U, 57
 
 // initialisation blobs to send to the GPS to try to get it into the
 // right mode
-const char AP_GPS::_initialisation_blob[] = UBLOX_SET_BINARY MTK_SET_BINARY SIRF_SET_BINARY;
+const char AP_GPS::_initialisation_blob[] = UBLOX_SET_BINARY_230400 MTK_SET_BINARY SIRF_SET_BINARY;
 
 AP_GPS *AP_GPS::_singleton;
 
@@ -288,6 +288,15 @@ const AP_Param::GroupInfo AP_GPS::var_info[] = {
     // @Range: 5.0 30.0
     // @User: Advanced
     AP_GROUPINFO("BLEND_TC", 21, AP_GPS, _blend_tc, 10.0f),
+#endif
+
+#if GPS_UBLOX_MOVING_BASELINE
+    // @Param: DRV_OPTIONS
+    // @DisplayName: driver options
+    // @Description: Additional backend specific options
+    // @Bitmask: 0:Use UART2 for moving baseline on ublox
+    // @User: Advanced
+    AP_GROUPINFO("DRV_OPTIONS", 22, AP_GPS, _driver_options, 0),
 #endif
 
     AP_GROUPEND
@@ -556,13 +565,13 @@ void AP_GPS::detect_instance(uint8_t instance)
           running a uBlox at less than 38400 will lead to packet
           corruption, as we can't receive the packets in the 200ms
           window for 5Hz fixes. The NMEA startup message should force
-          the uBlox into 115200 no matter what rate it is configured
+          the uBlox into 230400 no matter what rate it is configured
           for.
         */
         if ((_type[instance] == GPS_TYPE_AUTO ||
              _type[instance] == GPS_TYPE_UBLOX) &&
             ((!_auto_config && _baudrates[dstate->current_baud] >= 38400) ||
-             _baudrates[dstate->current_baud] == 115200) &&
+             _baudrates[dstate->current_baud] == 230400) &&
             AP_GPS_UBLOX::_detect(dstate->ublox_detect_state, data)) {
             new_gps = new AP_GPS_UBLOX(*this, state[instance], _port[instance], GPS_ROLE_NORMAL);
         }
@@ -739,6 +748,7 @@ void AP_GPS::update_instance(uint8_t instance)
         data_should_be_logged = true;
     }
 
+#if GPS_MAX_RECEIVERS > 1
     if (drivers[instance] && _type[instance] == GPS_TYPE_UBLOX_RTK_BASE) {
         // see if a moving baseline base has some RTCMv3 data
         // which we need to pass along to the rover
@@ -755,7 +765,27 @@ void AP_GPS::update_instance(uint8_t instance)
             }
         }
     }
+#endif
 
+    if (data_should_be_logged) {
+        // keep count of delayed frames and average frame delay for health reporting
+        const uint16_t gps_max_delta_ms = 245; // 200 ms (5Hz) + 45 ms buffer
+        GPS_timing &t = timing[instance];
+
+        if (t.delta_time_ms > gps_max_delta_ms) {
+            t.delayed_count++;
+        } else {
+            t.delayed_count = 0;
+        }
+        if (t.delta_time_ms < 2000) {
+            if (t.average_delta_ms <= 0) {
+                t.average_delta_ms = t.delta_time_ms;
+            } else {
+                t.average_delta_ms = 0.98f * t.average_delta_ms + 0.02f * t.delta_time_ms;
+            }
+        }
+    }
+    
 #ifndef HAL_BUILD_AP_PERIPH
     if (data_should_be_logged &&
         (should_log() || AP::ahrs().have_ekf_logging())) {
@@ -854,6 +884,29 @@ void AP_GPS::update_primary(void)
         if (_type[i] == GPS_TYPE_UBLOX_RTK_ROVER &&
             state[i].status == GPS_OK_FIX_3D_RTK_FIXED &&
             state[i].have_gps_yaw) {
+            if (primary_instance != i) {
+                _last_instance_swap_ms = now;
+                primary_instance = i;
+            }
+            return;
+        }
+        /*
+          if this is a BASE and the other GPS is a MB rover, then we
+          should force the use of the BASE GPS if the rover doesn't
+          have a yaw lock. This is important as when the rover doesn't
+          have a lock it will often report a higher status than the
+          base (eg. status=4), but the velocity and position data can
+          be very bad. As the rover is getting it's base position from
+          the base GPS then the position and velocity are expected to
+          be worse than the base GPS unless it has a full moving
+          baseline lock
+         */
+        const uint8_t i2 = i^1; // the other GPS in the pair
+        if (_type[i] == GPS_TYPE_UBLOX_RTK_BASE &&
+            state[i].status >= GPS_OK_FIX_3D &&
+            _type[i2] == GPS_TYPE_UBLOX_RTK_ROVER &&
+            (state[i2].status != GPS_OK_FIX_3D_RTK_FIXED ||
+             !state[i2].have_gps_yaw)) {
             if (primary_instance != i) {
                 _last_instance_swap_ms = now;
                 primary_instance = i;
@@ -1142,7 +1195,7 @@ void AP_GPS::broadcast_first_configuration_failure_reason(void) const
     uint8_t unconfigured;
     if (first_unconfigured_gps(unconfigured)) {
         if (drivers[unconfigured] == nullptr) {
-            gcs().send_text(MAV_SEVERITY_INFO, "GPS %d: was not found", unconfigured + 1);
+            GCS_SEND_TEXT(MAV_SEVERITY_INFO, "GPS %d: was not found", unconfigured + 1);
         } else {
             drivers[unconfigured]->broadcast_configuration_failure_reason();
         }
@@ -1675,18 +1728,24 @@ bool AP_GPS::is_healthy(uint8_t instance) const
         return false;
     }
 
-    const uint16_t gps_max_delta_ms = 245; // 200 ms (5Hz) + 45 ms buffer
-
-    bool last_msg_valid = last_message_delta_time_ms(instance) < gps_max_delta_ms;
+    /*
+      allow two lost frames before declaring the GPS unhealthy, but
+      require the average frame rate to be close to 5Hz. We allow for
+      a bit higher average for a rover due to the packet loss that
+      happens with the RTCMv3 data
+     */
+    const uint8_t delay_threshold = 2;
+    const float delay_avg_max = _type[instance] == GPS_TYPE_UBLOX_RTK_ROVER?245:215;
+    const GPS_timing &t = timing[instance];
+    bool delay_ok = (t.delayed_count < delay_threshold) && t.average_delta_ms < delay_avg_max;
 
 #if defined(GPS_BLENDED_INSTANCE)
     if (instance == GPS_BLENDED_INSTANCE) {
-        return last_msg_valid && blend_health_check();
+        return delay_ok && blend_health_check();
     }
 #endif
 
-    return last_msg_valid &&
-           drivers[instance] != nullptr &&
+    return delay_ok && drivers[instance] != nullptr &&
            drivers[instance]->is_healthy();
 }
 
