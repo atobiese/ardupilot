@@ -230,19 +230,14 @@ bool Compass::_accept_calibration_mask(uint8_t mask)
 
 bool Compass::send_mag_cal_progress(const GCS_MAVLINK& link)
 {
-    uint8_t cal_mask = _get_cal_mask();
+    const mavlink_channel_t chan = link.get_chan();
 
-    for (Priority compass_id(0); compass_id<COMPASS_MAX_INSTANCES; compass_id++) {
-        // ensure we don't try to send with no space available
-        if (!HAVE_PAYLOAD_SPACE(link.get_chan(), MAG_CAL_PROGRESS)) {
-            // ideally we would only send one progress message per
-            // call.  If we don't return true here we may end up
-            // hogging *all* the bandwidth
-            return true;
-        }
+    for (uint8_t i = 0; i < COMPASS_MAX_INSTANCES; i++) {
+        const Priority compass_id = (next_cal_progress_idx[chan] + 1) % COMPASS_MAX_INSTANCES;
         
         auto& calibrator = _calibrator[compass_id];
         if (calibrator == nullptr) {
+            next_cal_progress_idx[chan] = compass_id;
             continue;
         }
         const CompassCalibrator::State cal_state = calibrator->get_state();
@@ -250,12 +245,22 @@ bool Compass::send_mag_cal_progress(const GCS_MAVLINK& link)
         if (cal_state.status == CompassCalibrator::Status::WAITING_TO_START  ||
             cal_state.status == CompassCalibrator::Status::RUNNING_STEP_ONE ||
             cal_state.status == CompassCalibrator::Status::RUNNING_STEP_TWO) {
+            // ensure we don't try to send with no space available
+            if (!HAVE_PAYLOAD_SPACE(chan, MAG_CAL_PROGRESS)) {
+                return false;
+            }
+
+            next_cal_progress_idx[chan] = compass_id;
+
             mavlink_msg_mag_cal_progress_send(
                 link.get_chan(),
-                uint8_t(compass_id), cal_mask,
+                uint8_t(compass_id),
+                _get_cal_mask(),
                 (uint8_t)cal_state.status, cal_state.attempt, cal_state.completion_pct, cal_state.completion_mask,
                 0.0f, 0.0f, 0.0f
             );
+        } else {
+            next_cal_progress_idx[chan] = compass_id;
         }
     }
 
@@ -264,28 +269,33 @@ bool Compass::send_mag_cal_progress(const GCS_MAVLINK& link)
 
 bool Compass::send_mag_cal_report(const GCS_MAVLINK& link)
 {
-    uint8_t cal_mask = _get_cal_mask();
+    const mavlink_channel_t chan = link.get_chan();
 
-    for (Priority compass_id(0); compass_id<COMPASS_MAX_INSTANCES; compass_id++) {
-        // ensure we don't try to send with no space available
-        if (!HAVE_PAYLOAD_SPACE(link.get_chan(), MAG_CAL_REPORT)) {
-            // ideally we would only send one progress message per
-            // call.  If we don't return true here we may end up
-            // hogging *all* the bandwidth
-            return true;
-        }
+    for (uint8_t i = 0; i < COMPASS_MAX_INSTANCES; i++) {
+        const Priority compass_id = (next_cal_report_idx[chan] + 1) % COMPASS_MAX_INSTANCES;
+
         if (_calibrator[compass_id] == nullptr) {
+            next_cal_report_idx[chan] = compass_id;
             continue;
         }
         const CompassCalibrator::Report cal_report = _calibrator[compass_id]->get_report();
         if (cal_report.status == CompassCalibrator::Status::SUCCESS ||
             cal_report.status == CompassCalibrator::Status::FAILED ||
             cal_report.status == CompassCalibrator::Status::BAD_ORIENTATION) {
-            uint8_t autosaved = _cal_saved[compass_id];
+
+            // ensure we don't try to send with no space available
+            if (!HAVE_PAYLOAD_SPACE(chan, MAG_CAL_REPORT)) {
+                return false;
+            }
+
+            next_cal_report_idx[chan] = compass_id;
+
             mavlink_msg_mag_cal_report_send(
                 link.get_chan(),
-                uint8_t(compass_id), cal_mask,
-                (uint8_t)cal_report.status, autosaved,
+                uint8_t(compass_id),
+                _get_cal_mask(),
+                (uint8_t)cal_report.status,
+                _cal_saved[compass_id],
                 cal_report.fitness,
                 cal_report.ofs.x, cal_report.ofs.y, cal_report.ofs.z,
                 cal_report.diag.x, cal_report.diag.y, cal_report.diag.z,
@@ -295,6 +305,8 @@ bool Compass::send_mag_cal_report(const GCS_MAVLINK& link)
                 cal_report.orientation,
                 cal_report.scale_factor
             );
+        } else {
+            next_cal_report_idx[chan] = compass_id;
         }
     }
     return true;
@@ -360,6 +372,7 @@ MAV_RESULT Compass::handle_mag_cal_command(const mavlink_command_long_t &packet)
         bool autoreboot = !is_zero(packet.param5);
 
         if (mag_mask == 0) { // 0 means all
+            _reset_compass_id();
             start_calibration_all(retry, autosave, delay, autoreboot);
         } else {
             if (!_start_calibration_mask(mag_mask, retry, autosave, delay, autoreboot)) {
@@ -460,6 +473,7 @@ bool Compass::get_uncorrected_field(uint8_t instance, Vector3f &field)
 MAV_RESULT Compass::mag_cal_fixed_yaw(float yaw_deg, uint8_t compass_mask,
                                       float lat_deg, float lon_deg)
 {
+    _reset_compass_id();
     if (is_zero(lat_deg) && is_zero(lon_deg)) {
         Location loc;
         // get AHRS position. If unavailable then try GPS location

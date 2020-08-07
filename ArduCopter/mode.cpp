@@ -300,7 +300,7 @@ bool Copter::set_mode(const uint8_t new_mode, const ModeReason reason)
         return false;
     }
 #endif
-    return copter.set_mode(static_cast<Mode::Number>(new_mode), ModeReason::GCS_COMMAND);
+    return copter.set_mode(static_cast<Mode::Number>(new_mode), reason);
 }
 
 // update_flight_mode - calls the appropriate attitude controllers based on flight mode
@@ -328,9 +328,9 @@ void Copter::exit_mode(Mode *&old_flightmode,
         if (mode_auto.mission.state() == AP_Mission::MISSION_RUNNING) {
             mode_auto.mission.stop();
         }
-#if MOUNT == ENABLED
+#if HAL_MOUNT_ENABLED
         camera_mount.set_mode_to_default();
-#endif  // MOUNT == ENABLED
+#endif  // HAL_MOUNT_ENABLED
     }
 #endif
 
@@ -359,6 +359,12 @@ void Copter::exit_mode(Mode *&old_flightmode,
 #if MODE_ZIGZAG_ENABLED == ENABLED
     if (old_flightmode == &mode_zigzag) {
         mode_zigzag.exit();
+    }
+#endif
+
+#if MODE_ACRO_ENABLED == ENABLED
+    if (old_flightmode == &mode_acro) {
+        mode_acro.exit();
     }
 #endif
 
@@ -790,9 +796,12 @@ GCS_Copter &Mode::gcs()
     return copter.gcs();
 }
 
+// set_throttle_takeoff - allows modes to tell throttle controller we
+// are taking off so I terms can be cleared
 void Mode::set_throttle_takeoff()
 {
-    return copter.set_throttle_takeoff();
+    // tell position controller to reset alt target and reset I terms
+    pos_control->init_takeoff();
 }
 
 float Mode::get_avoidance_adjusted_climbrate(float target_rate)
