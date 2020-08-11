@@ -804,11 +804,11 @@ MAV_RESULT GCS_MAVLINK_Copter::handle_command_long_packet(const mavlink_command_
         // param3 : throttle (range depends upon param2)
         // param4 : timeout (in seconds)
         // param5 : num_motors (in sequence)
-        // param6 : compass learning (0: disabled, 1: enabled)
+        // param6 : motor test order
         return copter.mavlink_motor_test_start(*this,
                                                (uint8_t)packet.param1,
                                                (uint8_t)packet.param2,
-                                               (uint16_t)packet.param3,
+                                               packet.param3,
                                                packet.param4,
                                                (uint8_t)packet.param5);
 
@@ -945,6 +945,27 @@ void GCS_MAVLINK_Copter::handle_mount_message(const mavlink_message_t &msg)
 
 void GCS_MAVLINK_Copter::handleMessage(const mavlink_message_t &msg)
 {
+    // for mavlink SET_POSITION_TARGET messages
+    constexpr uint32_t MAVLINK_SET_POS_TYPE_MASK_POS_IGNORE =
+        POSITION_TARGET_TYPEMASK_X_IGNORE |
+        POSITION_TARGET_TYPEMASK_Y_IGNORE |
+        POSITION_TARGET_TYPEMASK_Z_IGNORE;
+
+    constexpr uint32_t MAVLINK_SET_POS_TYPE_MASK_VEL_IGNORE =
+        POSITION_TARGET_TYPEMASK_VX_IGNORE |
+        POSITION_TARGET_TYPEMASK_VY_IGNORE |
+        POSITION_TARGET_TYPEMASK_VZ_IGNORE;
+
+    constexpr uint32_t MAVLINK_SET_POS_TYPE_MASK_ACC_IGNORE =
+        POSITION_TARGET_TYPEMASK_AX_IGNORE |
+        POSITION_TARGET_TYPEMASK_AY_IGNORE |
+        POSITION_TARGET_TYPEMASK_AZ_IGNORE;
+
+    constexpr uint32_t MAVLINK_SET_POS_TYPE_MASK_YAW_IGNORE =
+        POSITION_TARGET_TYPEMASK_YAW_IGNORE;
+    constexpr uint32_t MAVLINK_SET_POS_TYPE_MASK_YAW_RATE_IGNORE =
+        POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE;
+
     switch (msg.msgid) {
 
     case MAVLINK_MSG_ID_HEARTBEAT:      // MAV ID: 0
