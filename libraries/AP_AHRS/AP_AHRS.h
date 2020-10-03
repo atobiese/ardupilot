@@ -210,6 +210,11 @@ public:
     // return a smoothed and corrected gyro vector in radians/second
     virtual const Vector3f &get_gyro(void) const = 0;
 
+    // return primary accels, for lua
+    const Vector3f &get_accel(void) const {
+        return AP::ins().get_accel();
+    }
+    
     // return a smoothed and corrected gyro vector in radians/second using the latest ins data (which may not have been consumed by the EKF yet)
     Vector3f get_gyro_latest(void) const;
 
@@ -285,6 +290,12 @@ public:
     // opposed to an IMU estimate
     bool airspeed_sensor_enabled(void) const {
         return _airspeed != nullptr && _airspeed->use() && _airspeed->healthy();
+    }
+
+    // return true if airspeed comes from a specific airspeed sensor, as
+    // opposed to an IMU estimate
+    bool airspeed_sensor_enabled(uint8_t airspeed_index) const {
+        return _airspeed != nullptr && _airspeed->use(airspeed_index) && _airspeed->healthy(airspeed_index);
     }
 
     // return the parameter AHRS_WIND_MAX in metres per second

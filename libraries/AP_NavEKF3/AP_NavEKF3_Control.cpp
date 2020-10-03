@@ -108,6 +108,7 @@ void NavEKF3_core::setWindMagStateLearningMode()
     if (!inhibitMagStates && setMagInhibit) {
         inhibitMagStates = true;
         updateStateIndexLim();
+        // variances will be reset in CovariancePrediction
     } else if (inhibitMagStates && !setMagInhibit) {
         inhibitMagStates = false;
         updateStateIndexLim();
@@ -121,7 +122,7 @@ void NavEKF3_core::setWindMagStateLearningMode()
             P[21][21] = bodyMagFieldVar.z;
         } else {
             // set the variances equal to the observation variances
-            for (uint8_t index=18; index<=21; index++) {
+            for (uint8_t index=16; index<=21; index++) {
                 P[index][index] = sq(frontend->_magNoise);
             }
 
@@ -164,6 +165,7 @@ void NavEKF3_core::setWindMagStateLearningMode()
     if (onGround) {
         finalInflightYawInit = false;
         finalInflightMagInit = false;
+        magFieldLearned = false;
     }
 
     updateStateIndexLim();
@@ -225,7 +227,7 @@ void NavEKF3_core::setAidingMode()
             bool bodyOdmFusionTimeout = ((imuSampleTime_ms - prevBodyVelFuseTime_ms) > 5000);
             // Enable switch to absolute position mode if GPS or range beacon data is available
             // If GPS or range beacons data is not available and flow fusion has timed out, then fall-back to no-aiding
-            if(readyToUseGPS() || readyToUseRangeBeacon()) {
+            if (readyToUseGPS() || readyToUseRangeBeacon() || readyToUseExtNav()) {
                 PV_AidingMode = AID_ABSOLUTE;
             } else if (flowFusionTimeout && bodyOdmFusionTimeout) {
                 PV_AidingMode = AID_NONE;
@@ -326,7 +328,7 @@ void NavEKF3_core::setAidingMode()
             // Reset the normalised innovation to avoid false failing bad fusion tests
             velTestRatio = 0.0f;
             posTestRatio = 0.0f;
-             // store the current position to be used to keep reporting the last known position
+            // store the current position to be used to keep reporting the last known position
             lastKnownPositionNE.x = stateStruct.position.x;
             lastKnownPositionNE.y = stateStruct.position.y;
             // initialise filtered altitude used to provide a takeoff reference to current baro on disarm
@@ -446,12 +448,11 @@ bool NavEKF3_core::readyToUseOptFlow(void) const
 // return true if the filter is ready to start using body frame odometry measurements
 bool NavEKF3_core::readyToUseBodyOdm(void) const
 {
-
     // Check for fresh visual odometry data that meets the accuracy required for alignment
     bool visoDataGood = (imuSampleTime_ms - bodyOdmMeasTime_ms < 200) && (bodyOdmDataNew.velErr < 1.0f);
 
     // Check for fresh wheel encoder data
-    bool wencDataGood = (imuSampleTime_ms - wheelOdmMeasTime_ms < 200);
+    bool wencDataGood = (imuDataDelayed.time_ms - wheelOdmDataDelayed.time_ms < 200);
 
     // We require stable roll/pitch angles and gyro bias estimates but do not need the yaw angle aligned to use odometry measurements
     // because they are in a body frame of reference

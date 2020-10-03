@@ -185,7 +185,7 @@ void AP_Logger::Write_GPS(uint8_t i, uint64_t time_us)
 // Write an RCIN packet
 void AP_Logger::Write_RCIN(void)
 {
-    uint16_t values[14] = {};
+    uint16_t values[16] = {};
     rc().get_radio_in(values, ARRAY_SIZE(values));
     const struct log_RCIN pkt{
         LOG_PACKET_HEADER_INIT(LOG_RCIN_MSG),
@@ -206,6 +206,23 @@ void AP_Logger::Write_RCIN(void)
         chan14        : values[13]
     };
     WriteBlock(&pkt, sizeof(pkt));
+
+    // don't waste logging bandwidth if we haven't seen non-zero
+    // channels 15/16:
+    if (!seen_nonzero_rcin15_or_rcin16) {
+        if (!values[14] && !values[15]) {
+            return;
+        }
+        seen_nonzero_rcin15_or_rcin16 = true;
+    }
+
+    const struct log_RCIN2 pkt2{
+        LOG_PACKET_HEADER_INIT(LOG_RCIN2_MSG),
+        time_us       : AP_HAL::micros64(),
+        chan15         : values[14],
+        chan16         : values[15]
+    };
+    WriteBlock(&pkt2, sizeof(pkt2));
 }
 
 // Write an SERVO packet
@@ -277,10 +294,10 @@ void AP_Logger::Write_Baro(uint64_t time_us)
     }
     const AP_Baro &baro = AP::baro();
     Write_Baro_instance(time_us, 0, LOG_BARO_MSG);
-    if (baro.num_instances() > 1 && baro.healthy(1)) {
+    if (baro.num_instances() > 1) {
         Write_Baro_instance(time_us, 1, LOG_BAR2_MSG);
     }
-    if (baro.num_instances() > 2 && baro.healthy(2)) {
+    if (baro.num_instances() > 2) {
         Write_Baro_instance(time_us, 2, LOG_BAR3_MSG);
     }
 }
@@ -1044,20 +1061,24 @@ void AP_Logger::Write_SRTL(bool active, uint16_t num_points, uint16_t max_points
     WriteBlock(&pkt_srtl, sizeof(pkt_srtl));
 }
 
-void AP_Logger::Write_OABendyRuler(bool active, float target_yaw, bool resist_chg, float margin, const Location &final_dest, const Location &oa_dest)
+void AP_Logger::Write_OABendyRuler(uint8_t type, bool active, float target_yaw, float target_pitch, bool resist_chg, float margin, const Location &final_dest, const Location &oa_dest)
 {
     const struct log_OABendyRuler pkt{
         LOG_PACKET_HEADER_INIT(LOG_OA_BENDYRULER_MSG),
         time_us     : AP_HAL::micros64(),
+        type        : type,
         active      : active,
         target_yaw  : (uint16_t)wrap_360(target_yaw),
         yaw         : (uint16_t)wrap_360(AP::ahrs().yaw_sensor * 0.01f),
+        target_pitch: (uint16_t)target_pitch,
         resist_chg  : resist_chg,
         margin      : margin,
         final_lat   : final_dest.lat,
         final_lng   : final_dest.lng,
+        final_alt   : final_dest.alt,
         oa_lat      : oa_dest.lat,
-        oa_lng      : oa_dest.lng
+        oa_lng      : oa_dest.lng,
+        oa_alt      : oa_dest.alt
     };
     WriteBlock(&pkt, sizeof(pkt));
 }
@@ -1110,6 +1131,27 @@ void AP_Logger::Write_Winch(bool healthy, bool thread_end, bool moving, bool clu
         tension         : tension,
         voltage         : voltage,
         temp            : temp
+    };
+    WriteBlock(&pkt, sizeof(pkt));
+}
+
+void AP_Logger::Write_PSC(const Vector3f &pos_target, const Vector3f &position, const Vector3f &vel_target, const Vector3f &velocity, const Vector3f &accel_target, const float &accel_x, const float &accel_y)
+{
+    struct log_PSC pkt{
+        LOG_PACKET_HEADER_INIT(LOG_PSC_MSG),
+        time_us         : AP_HAL::micros64(),
+        pos_target_x    : pos_target.x * 0.01f,
+        pos_target_Y    : pos_target.y * 0.01f,
+        position_x      : position.x * 0.01f,
+        position_y      : position.y * 0.01f,
+        vel_target_x    : vel_target.x * 0.01f,
+        vel_target_y    : vel_target.y * 0.01f,
+        velocity_x      : velocity.x * 0.01f,
+        velocity_y      : velocity.y * 0.01f,
+        accel_target_x  : accel_target.x * 0.01f,
+        accel_target_y  : accel_target.y * 0.01f,
+        accel_x         : accel_x * 0.01f,
+        accel_y         : accel_y * 0.01f
     };
     WriteBlock(&pkt, sizeof(pkt));
 }
