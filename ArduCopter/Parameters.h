@@ -447,7 +447,7 @@ public:
     AP_Int16        gcs_pid_mask;
 
 #if MODE_THROW_ENABLED == ENABLED
-    AP_Int8         throw_motor_start;
+    AP_Enum<ModeThrow::PreThrowMotorState>         throw_motor_start;
 #endif
 
     AP_Int8         rtl_alt_type;
@@ -497,7 +497,7 @@ public:
 #if MODE_THROW_ENABLED == ENABLED
     // Throw mode parameters
     AP_Int8 throw_nextmode;
-    AP_Int8 throw_type;
+    AP_Enum<ModeThrow::ThrowType> throw_type;
 #endif
 
     // ground effect compensation enable/disable
@@ -621,6 +621,16 @@ public:
 
 #if MODE_AUTO_ENABLED == ENABLED
     AP_Int32 auto_options;
+#endif
+
+#if MODE_GUIDED_ENABLED == ENABLED
+    AP_Int32 guided_options;
+#endif
+
+    AP_Float fs_gcs_timeout;
+
+#if MODE_RTL_ENABLED == ENABLED
+    AP_Int32 rtl_options;
 #endif
 
 };

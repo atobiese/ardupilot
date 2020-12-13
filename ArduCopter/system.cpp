@@ -55,10 +55,6 @@ void Copter::init_ardupilot()
     // setup telem slots with serial ports
     gcs().setup_uarts();
 
-#if GENERATOR_ENABLED
-    generator.init();
-#endif
-
 #if OSD_ENABLED == ENABLED
     osd.init();
 #endif
@@ -220,9 +216,6 @@ void Copter::init_ardupilot()
         enable_motor_output();
     }
 
-    // disable safety if requested
-    BoardConfig.init_safety();
-
     // flag that initialisation has completed
     ap.initialised = true;
 }
@@ -325,11 +318,11 @@ bool Copter::position_ok() const
     }
 
     // check ekf position estimate
-    return (ekf_position_ok() || optflow_position_ok());
+    return (ekf_has_absolute_position() || ekf_has_relative_position());
 }
 
-// ekf_position_ok - returns true if the ekf claims it's horizontal absolute position estimate is ok and home position is set
-bool Copter::ekf_position_ok() const
+// ekf_has_absolute_position - returns true if the EKF can provide an absolute WGS-84 position estimate
+bool Copter::ekf_has_absolute_position() const
 {
     if (!ahrs.have_inertial_nav()) {
         // do not allow navigation with dcm position
@@ -348,8 +341,8 @@ bool Copter::ekf_position_ok() const
     }
 }
 
-// optflow_position_ok - returns true if optical flow based position estimate is ok
-bool Copter::optflow_position_ok() const
+// ekf_has_relative_position - returns true if the EKF can provide a position estimate relative to it's starting position
+bool Copter::ekf_has_relative_position() const
 {
     // return immediately if EKF not used
     if (!ahrs.have_inertial_nav()) {
@@ -473,6 +466,8 @@ MAV_TYPE Copter::get_frame_mav_type()
             return MAV_TYPE_COAXIAL;
         case AP_Motors::MOTOR_FRAME_DODECAHEXA:
             return MAV_TYPE_DODECAROTOR;
+        case AP_Motors::MOTOR_FRAME_DECA:
+            return MAV_TYPE_DECAROTOR;
     }
     // unknown frame so return generic
     return MAV_TYPE_GENERIC;
@@ -508,6 +503,8 @@ const char* Copter::get_frame_string()
             return "TAILSITTER";
         case AP_Motors::MOTOR_FRAME_DODECAHEXA:
             return "DODECA_HEXA";
+        case AP_Motors::MOTOR_FRAME_DECA:
+            return "DECA";
         case AP_Motors::MOTOR_FRAME_UNDEFINED:
         default:
             return "UNKNOWN";
@@ -527,6 +524,7 @@ void Copter::allocate_motors(void)
         case AP_Motors::MOTOR_FRAME_OCTA:
         case AP_Motors::MOTOR_FRAME_OCTAQUAD:
         case AP_Motors::MOTOR_FRAME_DODECAHEXA:
+        case AP_Motors::MOTOR_FRAME_DECA:
         default:
             motors = new AP_MotorsMatrix(copter.scheduler.get_loop_rate_hz());
             motors_var_info = AP_MotorsMatrix::var_info;

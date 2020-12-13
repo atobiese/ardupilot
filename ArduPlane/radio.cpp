@@ -105,8 +105,6 @@ void Plane::init_rc_out_aux()
 {
     SRV_Channels::enable_aux_servos();
 
-    SRV_Channels::cork();
-    
     servos_output();
     
     // setup PWM values to send if the FMU firmware dies
@@ -186,8 +184,6 @@ void Plane::read_radio()
 {
     if (!rc().read_input()) {
         control_failsafe();
-        airspeed_nudge_cm = 0;
-        throttle_nudge = 0;
         return;
     }
 
@@ -268,6 +264,9 @@ void Plane::control_failsafe()
         channel_roll->set_control_in(0);
         channel_pitch->set_control_in(0);
         channel_rudder->set_control_in(0);
+
+        airspeed_nudge_cm = 0;
+        throttle_nudge = 0;
 
         switch (control_mode->mode_number()) {
             case Mode::Number::QSTABILIZE:

@@ -124,12 +124,9 @@ bool AP_Arming_Plane::ins_checks(bool display_failure)
     // additional plane specific checks
     if ((checks_to_perform & ARMING_CHECK_ALL) ||
         (checks_to_perform & ARMING_CHECK_INS)) {
-        if (!AP::ahrs().prearm_healthy()) {
-            const char *reason = AP::ahrs().prearm_failure_reason();
-            if (reason == nullptr) {
-                reason = "AHRS not healthy";
-            }
-            check_failed(ARMING_CHECK_INS, display_failure, "%s", reason);
+        char failure_msg[50] = {};
+        if (!AP::ahrs().pre_arm_check(failure_msg, sizeof(failure_msg))) {
+            check_failed(ARMING_CHECK_INS, display_failure, "AHRS: %s", failure_msg);
             return false;
         }
     }
@@ -154,7 +151,7 @@ bool AP_Arming_Plane::arm_checks(AP_Arming::Method method)
     }
 
 #if GEOFENCE_ENABLED == ENABLED
-    if (plane.g.fence_autoenable == 3) {
+    if (plane.g.fence_autoenable == FenceAutoEnable::WhenArmed) {
         if (!plane.geofence_set_enabled(true)) {
             gcs().send_text(MAV_SEVERITY_WARNING, "Fence: cannot enable for arming");
             return false;
@@ -242,7 +239,7 @@ bool AP_Arming_Plane::disarm(const AP_Arming::Method method)
     gcs().send_text(MAV_SEVERITY_INFO, "Throttle disarmed");
 
 #if GEOFENCE_ENABLED == ENABLED
-    if (plane.g.fence_autoenable == 3) {
+    if (plane.g.fence_autoenable == FenceAutoEnable::WhenArmed) {
         plane.geofence_set_enabled(false);
     }
 #endif

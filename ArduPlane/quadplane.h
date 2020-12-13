@@ -83,8 +83,8 @@ public:
     /*
       return true if we are a tailsitter transitioning to VTOL flight
     */
-    bool in_tailsitter_vtol_transition(void) const;
-    
+    bool in_tailsitter_vtol_transition(uint32_t now = 0) const;
+
     bool handle_do_vtol_transition(enum MAV_VTOL_STATE state);
 
     bool do_vtol_takeoff(const AP_Mission::Mission_Command& cmd);
@@ -130,6 +130,9 @@ public:
     // check if we have completed transition to fixed wing
     bool tailsitter_transition_fw_complete(void);
 
+    // return true if we are a tailsitter in FW flight
+    bool is_tailsitter_in_fw_flight(void) const;
+
     // check if we have completed transition to vtol
     bool tailsitter_transition_vtol_complete(void) const;
 
@@ -160,6 +163,7 @@ public:
         float    throttle_mix;
         float    speed_scaler;
         uint8_t  transition_state;
+        uint8_t  assist;
     };
 
     MAV_TYPE get_mav_type(void) const;
@@ -223,6 +227,9 @@ private:
     
     // get desired climb rate in cm/s
     float get_pilot_desired_climb_rate_cms(void) const;
+
+    // get pilot lean angle
+    void get_pilot_desired_lean_angles(float &roll_out_cd, float &pitch_out_cd, float angle_max_cd, float angle_limit_cd) const;
 
     // initialise throttle_wait when entering mode
     void init_throttle_wait();
@@ -491,7 +498,6 @@ private:
     enum tailsitter_gscl_mask {
         TAILSITTER_GSCL_BOOST   = (1U<<0),
         TAILSITTER_GSCL_ATT_THR = (1U<<1),
-        TAILSITTER_GSCL_INTERP  = (1U<<2),
     };
 
     // tailsitter control variables
@@ -513,7 +519,8 @@ private:
     } tailsitter;
 
     // tailsitter speed scaler
-    float last_spd_scaler = 1.0f;
+    float last_spd_scaler = 1.0f; // used to slew rate limiting with TAILSITTER_GSCL_ATT_THR option
+    float log_spd_scaler; // for QTUN log
 
     // the attitude view of the VTOL attitude controller
     AP_AHRS_View *ahrs_view;
@@ -568,6 +575,8 @@ private:
         OPTION_AIRMODE=(1<<9),
         OPTION_DISARMED_TILT=(1<<10),
         OPTION_DELAY_ARMING=(1<<11),
+        OPTION_DISABLE_SYNTHETIC_AIRSPEED_ASSIST=(1<<12),
+        OPTION_DISABLE_GROUND_EFFECT_COMP=(1<<13),
     };
 
     AP_Float takeoff_failure_scalar;
