@@ -192,18 +192,19 @@ static void main_loop()
     ChibiOS::I2CBus::clear_all();
 #endif
 
+#ifndef HAL_NO_SHARED_DMA
     ChibiOS::Shared_DMA::init();
+#endif
+
     peripheral_power_enable();
 
-    hal.uartA->begin(115200);
+    hal.serial(0)->begin(115200);
 
 #ifdef HAL_SPI_CHECK_CLOCK_FREQ
     // optional test of SPI clock frequencies
     ChibiOS::SPIDevice::test_clock_freq();
 #endif
 
-    hal.uartB->begin(38400);
-    hal.uartC->begin(57600);
     hal.analogin->init();
     hal.scheduler->init();
 
@@ -223,6 +224,10 @@ static void main_loop()
 
     g_callbacks->setup();
 
+#if HAL_ENABLE_SAVE_PERSISTENT_PARAMS
+    utilInstance.apply_persistent_params();
+#endif
+
 #ifdef IOMCU_FW
     stm32_watchdog_init();
 #elif !defined(HAL_BOOTLOADER_BUILD)
@@ -238,7 +243,7 @@ static void main_loop()
 
     schedulerInstance.watchdog_pat();
 
-    hal.scheduler->system_initialized();
+    hal.scheduler->set_system_initialized();
 
     thread_running = true;
     chRegSetThreadName(SKETCHNAME);

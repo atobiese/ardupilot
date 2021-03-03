@@ -51,7 +51,7 @@ static const float GYRO_SCALE = (0.0174532f / 16.4f);
 #include "AP_InertialSensor_Invensensev2_registers.h"
 
 #define INV2_SAMPLE_SIZE 14
-#define INV2_FIFO_BUFFER_LEN 16
+#define INV2_FIFO_BUFFER_LEN 8
 
 #define int16_val(v, idx) ((int16_t)(((uint16_t)v[2*idx] << 8) | v[2*idx+1]))
 #define uint16_val(v, idx)(((uint16_t)v[2*idx] << 8) | v[2*idx+1])
@@ -523,7 +523,9 @@ void AP_InertialSensor_Invensensev2::_read_fifo()
 check_registers:
     // check next register value for correctness
     _dev->set_speed(AP_HAL::Device::SPEED_LOW);
-    if (!_dev->check_next_register()) {
+    AP_HAL::Device::checkreg reg;
+    if (!_dev->check_next_register(reg)) {
+        log_register_change(_dev->get_bus_id(), reg);
         _inc_gyro_error_count(_gyro_instance);
         _inc_accel_error_count(_accel_instance);
     }

@@ -22,6 +22,7 @@
 #include "GPS_detect_state.h"
 #include <AP_SerialManager/AP_SerialManager.h>
 #include <AP_MSP/msp.h>
+#include <AP_ExternalAHRS/AP_ExternalAHRS.h>
 
 /**
    maximum number of GPS instances available on this platform. If more
@@ -65,6 +66,7 @@ class AP_GPS
     friend class AP_GPS_GSOF;
     friend class AP_GPS_MAV;
     friend class AP_GPS_MSP;
+    friend class AP_GPS_ExternalAHRS;
     friend class AP_GPS_MTK;
     friend class AP_GPS_MTK19;
     friend class AP_GPS_NMEA;
@@ -115,6 +117,7 @@ public:
         GPS_TYPE_UBLOX_RTK_ROVER = 18,
         GPS_TYPE_MSP = 19,
         GPS_TYPE_ALLYSTAR = 20, // AllyStar NMEA
+        GPS_TYPE_EXTERNAL_AHRS = 21,
     };
 
     /// GPS status codes
@@ -140,10 +143,6 @@ public:
         GPS_ENGINE_AIRBORNE_1G = 6,
         GPS_ENGINE_AIRBORNE_2G = 7,
         GPS_ENGINE_AIRBORNE_4G = 8
-    };
-
-    enum GPS_Config {
-       GPS_ALL_CONFIGURED = 255
     };
 
     // role for auto-config
@@ -213,6 +212,9 @@ public:
 #if HAL_MSP_GPS_ENABLED
     void handle_msp(const MSP::msp_gps_data_message_t &pkt);
 #endif
+#if HAL_EXTERNAL_AHRS_ENABLED
+    void handle_external(const AP_ExternalAHRS::gps_data_message_t &pkt);
+#endif
 
     // Accessor functions
 
@@ -236,6 +238,29 @@ public:
     }
     GPS_Status status(void) const {
         return status(primary_instance);
+    }
+
+    // return a single human-presentable character representing the
+    // fix type.  For space-constrained human-readable displays
+    char status_onechar(void) const {
+        switch (status()) {
+        case AP_GPS::NO_GPS:
+            return ' ';
+        case AP_GPS::NO_FIX:
+            return '-';
+        case AP_GPS::GPS_OK_FIX_2D:
+            return '2';
+        case AP_GPS::GPS_OK_FIX_3D:
+            return '3';
+        case AP_GPS::GPS_OK_FIX_3D_DGPS:
+            return '4';
+        case AP_GPS::GPS_OK_FIX_3D_RTK_FLOAT:
+            return '5';
+        case AP_GPS::GPS_OK_FIX_3D_RTK_FIXED:
+            return '6';
+        }
+        // should never reach here; compiler flags guarantees this.
+        return '?';
     }
 
     // Query the highest status this GPS supports (always reports GPS_OK_FIX_3D for the blended GPS)
@@ -282,7 +307,7 @@ public:
     }
 
     // ground speed in cm/s
-    uint32_t ground_speed_cm(void) {
+    uint32_t ground_speed_cm(void) const {
         return ground_speed() * 100;
     }
 
@@ -670,6 +695,10 @@ private:
 
     // used for flight testing with GPS yaw loss
     bool _force_disable_gps_yaw;
+
+    // logging support
+    void Write_GPS(uint8_t instance);
+
 };
 
 namespace AP {

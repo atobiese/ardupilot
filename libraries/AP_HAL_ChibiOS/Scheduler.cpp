@@ -51,6 +51,9 @@ extern const AP_HAL::HAL& hal;
 #ifndef HAL_NO_TIMER_THREAD
 THD_WORKING_AREA(_timer_thread_wa, TIMER_THD_WA_SIZE);
 #endif
+#ifndef HAL_NO_RCOUT_THREAD
+THD_WORKING_AREA(_rcout_thread_wa, RCOUT_THD_WA_SIZE);
+#endif
 #ifndef HAL_NO_RCIN_THREAD
 THD_WORKING_AREA(_rcin_thread_wa, RCIN_THD_WA_SIZE);
 #endif
@@ -91,6 +94,15 @@ void Scheduler::init()
                      this);                     /* Thread parameter.    */
 #endif
 
+#ifndef HAL_NO_RCOUT_THREAD
+    // setup the RCOUT thread - this will call tasks at 1kHz
+    _rcout_thread_ctx = chThdCreateStatic(_rcout_thread_wa,
+                     sizeof(_rcout_thread_wa),
+                     APM_RCOUT_PRIORITY,        /* Initial priority.    */
+                     _rcout_thread,             /* Thread function.     */
+                     this);                     /* Thread parameter.    */
+#endif
+
 #ifndef HAL_NO_RCIN_THREAD
     // setup the RCIN thread - this will call tasks at 1kHz
     _rcin_thread_ctx = chThdCreateStatic(_rcin_thread_wa,
@@ -118,7 +130,6 @@ void Scheduler::init()
 #endif
 
 }
-
 
 void Scheduler::delay_microseconds(uint16_t usec)
 {
@@ -320,13 +331,26 @@ void Scheduler::_timer_thread(void *arg)
         // run registered timers
         sched->_run_timers();
 
-        // process any pending RC output requests
-        hal.rcout->timer_tick();
-
         if (sched->in_expected_delay()) {
             sched->watchdog_pat();
         }
     }
+}
+
+void Scheduler::_rcout_thread(void *arg)
+{
+#ifndef HAL_NO_RCOUT_THREAD
+    Scheduler *sched = (Scheduler *)arg;
+    chRegSetThreadName("rcout");
+
+    while (!sched->_hal_initialized) {
+        sched->delay_microseconds(1000);
+    }
+#if HAL_USE_PWM == TRUE
+    // trampoline into the rcout thread
+    ((RCOutput*)hal.rcout)->rcout_thread();
+#endif
+#endif
 }
 
 /*
@@ -345,7 +369,7 @@ bool Scheduler::in_expected_delay(void) const
             return true;
         }
     }
-#ifndef HAL_NO_FLASH_SUPPORT
+#if !defined(HAL_NO_FLASH_SUPPORT) && !defined(HAL_BOOTLOADER_BUILD)
     if (stm32_flash_recent_erase()) {
         return true;
     }
@@ -565,10 +589,10 @@ void Scheduler::_storage_thread(void* arg)
     }
 }
 
-void Scheduler::system_initialized()
+void Scheduler::set_system_initialized()
 {
     if (_initialized) {
-        AP_HAL::panic("PANIC: scheduler::system_initialized called"
+        AP_HAL::panic("PANIC: scheduler::set_system_initialized called"
                       "more than once");
     }
     _initialized = true;
@@ -625,6 +649,7 @@ bool Scheduler::thread_create(AP_HAL::MemberProc proc, const char *name, uint32_
         { PRIORITY_I2C, APM_I2C_PRIORITY},
         { PRIORITY_CAN, APM_CAN_PRIORITY},
         { PRIORITY_TIMER, APM_TIMER_PRIORITY},
+        { PRIORITY_RCOUT, APM_RCOUT_PRIORITY},
         { PRIORITY_RCIN, APM_RCIN_PRIORITY},
         { PRIORITY_IO, APM_IO_PRIORITY},
         { PRIORITY_UART, APM_UART_PRIORITY},

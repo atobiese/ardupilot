@@ -57,7 +57,7 @@ public:
     void                set_throttle_passthrough_for_esc_calibration(float throttle_input);
 
     // get_lift_max - get maximum lift ratio - for logging purposes only
-    float               get_lift_max() { return _lift_max; }
+    float               get_lift_max() const { return _lift_max; }
 
     // get_batt_voltage_filt - get battery voltage ratio - for logging purposes only
     float               get_batt_voltage_filt() const { return _batt_voltage_filt.get(); }
@@ -96,6 +96,10 @@ public:
         _thrust_compensation_callback = callback;
     }
     
+    // disable the use of motor torque to control yaw. Used when an external mechanism such
+    // as vectoring is used for yaw control
+    virtual void        disable_yaw_torque(void) {}
+
     // var_info for holding Parameter information
     static const struct AP_Param::GroupInfo        var_info[];
 

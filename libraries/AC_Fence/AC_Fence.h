@@ -19,6 +19,7 @@
 #define AC_FENCE_ACTION_ALWAYS_LAND                 2       // always land
 #define AC_FENCE_ACTION_SMART_RTL                   3       // smartRTL, if that fails, RTL, it that still fails, land
 #define AC_FENCE_ACTION_BRAKE                       4       // brake, if that fails, land
+#define AC_FENCE_ACTION_SMART_RTL_OR_LAND           5       // SmartRTL, if that fails, Land
 
 // default boundaries
 #define AC_FENCE_ALT_MAX_DEFAULT                    100.0f  // default max altitude is 100m
@@ -168,8 +169,10 @@ private:
     uint8_t         _breached_fences;       // bitmask holding the fence type that was breached (i.e. AC_FENCE_TYPE_ALT_MIN, AC_FENCE_TYPE_CIRCLE)
     uint32_t        _breach_time;           // time of last breach in milliseconds
     uint16_t        _breach_count;          // number of times we have breached the fence
+    uint32_t _last_breach_notify_sent_ms;  // last time we sent a message about newly-breaching the fences
 
     uint32_t        _manual_recovery_start_ms;  // system time in milliseconds that pilot re-took manual control
+
 
     AC_PolyFence_loader _poly_loader{_total}; // polygon fence
 };

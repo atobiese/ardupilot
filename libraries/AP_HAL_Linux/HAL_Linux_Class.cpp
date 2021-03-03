@@ -163,6 +163,10 @@ static RCInput_SoloLink rcinDriver;
 static RCInput_Navio2 rcinDriver;
 #elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_RST_ZYNQ
 static RCInput_RCProtocol rcinDriver{"/dev/ttyPS0", NULL};
+#elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_VNAV
+// this is needed to allow for RC input using SERIALn_PROTOCOL=23. No fd is opened
+// in the linux driver and instead user needs to provide a uart via SERIALn_PROTOCOL
+static RCInput_RCProtocol rcinDriver{nullptr, nullptr};
 #else
 static RCInput rcinDriver;
 #endif
@@ -377,19 +381,14 @@ void HAL_Linux::run(int argc, char* const argv[], Callbacks* callbacks) const
     gpio->init();
     rcout->init();
     rcin->init();
-    uartA->begin(115200);
-    uartE->begin(115200);
-    uartF->begin(115200);
-    uartG->begin(115200);
-    uartH->begin(115200);
-    uartI->begin(115200);
+    serial(0)->begin(115200);
     analogin->init();
     utilInstance.init(argc+gopt.optind-1, &argv[gopt.optind-1]);
 
     // NOTE: See commit 9f5b4ffca ("AP_HAL_Linux_Class: Correct
     // deadlock, and infinite loop in setup()") for details about the
     // order of scheduler initialize and setup on Linux.
-    scheduler->system_initialized();
+    scheduler->set_system_initialized();
 
     // possibly load external modules
 #if AP_MODULE_SUPPORTED

@@ -31,7 +31,7 @@ const AP_Param::GroupInfo AC_Fence::var_info[] = {
     // @Param: ACTION
     // @DisplayName: Fence Action
     // @Description: What action should be taken when fence is breached
-    // @Values{Copter}: 0:Report Only,1:RTL or Land,2:Always Land,3:SmartRTL or RTL or Land,4:Brake or Land
+    // @Values{Copter}: 0:Report Only,1:RTL or Land,2:Always Land,3:SmartRTL or RTL or Land,4:Brake or Land,5:SmartRTL or Land
     // @Values{Rover}: 0:Report Only,1:RTL,2:Hold,3:SmartRTL,4:SmartRTL or Hold
     // @Values: 0:Report Only,1:RTL or Land
     // @User: Standard
@@ -401,7 +401,14 @@ void AC_Fence::record_breach(uint8_t fence_type)
 {
     // if we haven't already breached a limit, update the breach time
     if (!_breached_fences) {
-        _breach_time = AP_HAL::millis();
+        const uint32_t now = AP_HAL::millis();
+        _breach_time = now;
+
+        // emit a message indicated we're newly-breached, but not too often
+        if (now - _last_breach_notify_sent_ms > 1000) {
+            _last_breach_notify_sent_ms = now;
+            gcs().send_message(MSG_FENCE_STATUS);
+        }
     }
 
     // update breach count

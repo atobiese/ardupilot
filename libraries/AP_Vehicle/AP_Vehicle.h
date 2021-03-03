@@ -41,9 +41,11 @@
 #include <AP_ESC_Telem/AP_ESC_Telem.h>
 #include <AP_GyroFFT/AP_GyroFFT.h>
 #include <AP_VisualOdom/AP_VisualOdom.h>
-#include <AP_RCTelemetry/AP_VideoTX.h>
+#include <AP_VideoTX/AP_VideoTX.h>
 #include <AP_MSP/AP_MSP.h>
 #include <AP_Frsky_Telem/AP_Frsky_Parameters.h>
+#include <AP_ExternalAHRS/AP_ExternalAHRS.h>
+#include <AP_VideoTX/AP_SmartAudio.h>
 
 class AP_Vehicle : public AP_HAL::HAL::Callbacks {
 
@@ -75,15 +77,20 @@ public:
     // HAL::Callbacks implementation.
     void loop() override final;
 
-    bool virtual set_mode(const uint8_t new_mode, const ModeReason reason) = 0;
-    uint8_t virtual get_mode() const = 0;
+    // set_mode *must* set control_mode_reason
+    virtual bool set_mode(const uint8_t new_mode, const ModeReason reason) = 0;
+    virtual uint8_t get_mode() const = 0;
+
+    ModeReason get_control_mode_reason() const {
+        return control_mode_reason;
+    }
 
     /*
       common parameters for fixed wing aircraft
      */
     struct FixedWing {
         AP_Int8 throttle_min;
-        AP_Int8 throttle_max;	
+        AP_Int8 throttle_max;
         AP_Int8 throttle_slewrate;
         AP_Int8 throttle_cruise;
         AP_Int8 takeoff_throttle_max;
@@ -94,7 +101,7 @@ public:
         AP_Int8  crash_detection_enable;
         AP_Int16 roll_limit_cd;
         AP_Int16 pitch_limit_max_cd;
-        AP_Int16 pitch_limit_min_cd;        
+        AP_Int16 pitch_limit_min_cd;
         AP_Int8  autotune_level;
         AP_Int8  stall_prevention;
         AP_Int16 loiter_radius;
@@ -309,12 +316,22 @@ protected:
     AP_Generator generator;
 #endif
 
+#if HAL_EXTERNAL_AHRS_ENABLED
+    AP_ExternalAHRS externalAHRS;
+#endif
+    
+#if HAL_SMARTAUDIO_ENABLED
+    AP_SmartAudio smartaudio;
+#endif
+
     static const struct AP_Param::GroupInfo var_info[];
     static const struct AP_Scheduler::Task scheduler_tasks[];
 
 #if OSD_ENABLED
     void publish_osd_info();
 #endif
+
+    ModeReason control_mode_reason = ModeReason::UNKNOWN;
 
 private:
 

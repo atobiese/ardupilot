@@ -141,7 +141,7 @@ void ModeSystemId::run()
         // init_targets_on_arming is always set true for multicopter.
         if (motors->init_targets_on_arming()) {
             attitude_control->set_yaw_target_to_current_heading();
-            attitude_control->reset_rate_controller_I_terms();
+            attitude_control->reset_rate_controller_I_terms_smoothly();
         }
         break;
 
@@ -273,7 +273,7 @@ void ModeSystemId::run()
 }
 
 // log system id and attitude
-void ModeSystemId::log_data()
+void ModeSystemId::log_data() const
 {
     uint8_t index = copter.ahrs.get_primary_gyro_index();
     Vector3f delta_angle;
