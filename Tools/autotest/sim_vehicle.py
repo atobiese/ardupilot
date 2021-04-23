@@ -30,6 +30,11 @@ import binascii
 from pymavlink import mavextra
 from pysim import vehicleinfo
 
+import sys
+
+ROOT_DIR = os.path.abspath(os.curdir)  # Project root
+pathh = os.path.join(ROOT_DIR, 'ardupilot', 'modules', 'mavlink')  # 
+sys.path.append(pathh)
 
 # List of open terminal windows for macosx
 windowID = []
