@@ -392,7 +392,12 @@ void AP_CRSF_Telem::process_vtx_frame(VTXFrame* vtx) {
         vtx->is_in_pitmode, vtx->power, vtx->pitmode);
     AP_VideoTX& apvtx = AP::vtx();
 
-    apvtx.set_enabled(vtx->is_vtx_available);
+    // the user may have a VTX connected but not want AP to control it
+    // (for instance because they are using myVTX on the transmitter)
+    if (!apvtx.get_enabled()) {
+        return;
+    }
+
     apvtx.set_band(vtx->band);
     apvtx.set_channel(vtx->channel);
     if (vtx->is_in_user_frequency_mode) {
@@ -428,11 +433,16 @@ void AP_CRSF_Telem::process_vtx_frame(VTXFrame* vtx) {
     _vtx_power_change_pending = _vtx_freq_change_pending = _vtx_options_change_pending = false;
 }
 
-void AP_CRSF_Telem::process_vtx_telem_frame(VTXTelemetryFrame* vtx) {
+void AP_CRSF_Telem::process_vtx_telem_frame(VTXTelemetryFrame* vtx)
+{
     vtx->frequency = be16toh(vtx->frequency);
     debug("VTXTelemetry: Freq: %d, PitMode: %d, Power: %d", vtx->frequency, vtx->pitmode, vtx->power);
 
     AP_VideoTX& apvtx = AP::vtx();
+
+    if (!apvtx.get_enabled()) {
+        return;
+    }
 
     apvtx.set_frequency_mhz(vtx->frequency);
 
@@ -550,8 +560,14 @@ void AP_CRSF_Telem::update_vtx_params()
 {
     AP_VideoTX& vtx = AP::vtx();
 
+    if (!vtx.get_enabled()) {
+        return;
+    }
+
     _vtx_freq_change_pending = vtx.update_band() || vtx.update_channel() || vtx.update_frequency() || _vtx_freq_change_pending;
-    _vtx_power_change_pending = vtx.update_power() || _vtx_power_change_pending;
+    // don't update the power if we are supposed to be in pitmode as this will take us out of pitmode
+    const bool pitmode = vtx.get_configured_options() & uint8_t(AP_VideoTX::VideoOptions::VTX_PITMODE);
+    _vtx_power_change_pending = !pitmode && (vtx.update_power() || _vtx_power_change_pending);
     _vtx_options_change_pending = vtx.update_options() || _vtx_options_change_pending;
 
     if (_vtx_freq_change_pending || _vtx_power_change_pending || _vtx_options_change_pending) {
@@ -577,7 +593,15 @@ void AP_CRSF_Telem::update_vtx_params()
         _telem.ext.command.command_id = AP_RCProtocol_CRSF::CRSF_COMMAND_VTX;
 
         uint8_t len = 5;
-        if (_vtx_freq_change_pending && _vtx_freq_update) {
+        // prioritize option changes so that the pilot can get in and out of pitmode
+        if (_vtx_options_change_pending) {
+            _telem.ext.command.payload[0] = AP_RCProtocol_CRSF::CRSF_COMMAND_VTX_PITMODE;
+            if (vtx.get_configured_options() & uint8_t(AP_VideoTX::VideoOptions::VTX_PITMODE)) {
+                _telem.ext.command.payload[1] = 1;
+            } else {
+                _telem.ext.command.payload[1] = 0;
+            }
+        } else if (_vtx_freq_change_pending && _vtx_freq_update) {
             _telem.ext.command.payload[0] = AP_RCProtocol_CRSF::CRSF_COMMAND_VTX_FREQ;
             _telem.ext.command.payload[1] = (vtx.get_frequency_mhz() & 0xFF00) >> 8;
             _telem.ext.command.payload[2] = (vtx.get_frequency_mhz() & 0xFF);
@@ -612,13 +636,6 @@ void AP_CRSF_Telem::update_vtx_params()
             }
             _telem.ext.command.payload[1] = vtx.get_configured_power_level();
             _vtx_dbm_update = true;
-        } else if (_vtx_options_change_pending) {
-            _telem.ext.command.payload[0] = AP_RCProtocol_CRSF::CRSF_COMMAND_VTX_PITMODE;
-            if (vtx.get_configured_options() & uint8_t(AP_VideoTX::VideoOptions::VTX_PITMODE)) {
-                _telem.ext.command.payload[1] = 1;
-            } else {
-                _telem.ext.command.payload[1] = 0;
-            }
         }
         _telem_pending = true;
         // calculate command crc
